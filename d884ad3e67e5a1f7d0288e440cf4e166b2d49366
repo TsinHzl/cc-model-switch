@@ -1,0 +1,35 @@
+src/App.tsx
+  2cd26988f1e73403 34
+src/lib/__tests__/configEditorPreset.test.ts
+  2cd26988f1e73403 3
+src/lib/maskKey.ts
+  2cd26988f1e73403 1-11
+src/styles/components.css
+  2cd26988f1e73403 221
+src/components/ModelSwitch.tsx
+  2cd26988f1e73403 1-2,4,7-9,11-13,16-21,28-29,31,34,50-75,91-92,101-114,128-162,165,176-178,184-186,192-197,200-209,215,217-218,220-226,229-233,238-258,289,388-390
+src/components/EntryForm.tsx
+  2cd26988f1e73403 1-116
+src/components/ConfirmDelete.tsx
+  2cd26988f1e73403 1-55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "d884ad3e67e5a1f7d0288e440cf4e166b2d49366",
+  "prompts": {
+    "2cd26988f1e73403": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "92e2e0b6-e051-40dc-a482-ecb7edac9581",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 527,
+      "total_deletions": 630,
+      "accepted_lines": 354,
+      "overriden_lines": 0
+    }
+  }
+}

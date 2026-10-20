@@ -13,9 +13,13 @@ if [ -f "$PID_FILE" ] || lsof -ti :"$PORT" >/dev/null 2>&1; then
   ./stop.sh
 fi
 
-# dist 不存在时自动构建
+# dist 不存在时自动构建（依赖缺失时先安装）
 if [ ! -f dist/index.html ]; then
   echo "dist/ 不存在，先构建…"
+  if [ ! -d node_modules ]; then
+    echo "node_modules 不存在，先安装依赖…"
+    npm install
+  fi
   npm run build
 fi
 

@@ -102,31 +102,70 @@ export async function readFileText(key: FileKey): Promise<string> {
   return file.text();
 }
 
-/** 原子写入：写前先从磁盘重读最新内容交由 transform 增量修改，close() 才落盘 */
+/**
+ * 原子写入：写前先从磁盘重读最新内容交由 transform 增量修改，close() 才落盘。
+ * transform 必须为纯函数且幂等——写入冲突（InvalidStateError）重试时会被调用多次。
+ */
 export async function writeFileAtomic(
   key: FileKey,
   transform: (latest: string) => string,
 ): Promise<string> {
   const handle = await getAuthorizedHandle(key);
-  // 防 stale write：基于磁盘最新内容，而非页面内存副本
-  const latest = await (await handle.getFile()).text();
-  const next = transform(latest);
-  const writable = await handle.createWritable({ keepExistingData: false });
-  try {
-    await writable.write(next);
-    await writable.close();
-  } catch (err) {
+  let persisted = false;
+
+  const attempt = async (): Promise<string> => {
+    // 防 stale write：基于磁盘最新内容，而非页面内存副本
+    const latest = await (await handle.getFile()).text();
+    const next = transform(latest);
+    const writable = await handle.createWritable({ keepExistingData: false });
     try {
-      await writable.abort(undefined);
-    } catch {
-      /* abort 失败不掩盖原始错误 */
+      await writable.write(next);
+      await writable.close();
+    } catch (err) {
+      try {
+        await writable.abort(undefined);
+      } catch {
+        /* abort 失败不掩盖原始错误 */
+      }
+      throw err;
+    }
+    persisted = true;
+    // 写后回读验证
+    const written = await (await handle.getFile()).text();
+    if (written !== next) {
+      throw new Error(`写后回读校验失败（${key}），文件内容与预期不一致`);
+    }
+    return written;
+  };
+
+  try {
+    return await attempt();
+  } catch (err) {
+    // InvalidStateError：getFile 后文件被外部修改（另一标签页/编辑器/同步盘），句柄快照过期
+    // 重试会重新 getFile 刷新快照并基于最新内容重算 transform，安全幂等
+    // persisted 后仍抛 InvalidStateError 说明写入已落盘、仅回读校验受扰——不可重试（transform 会二次应用），也不可引导用户重试
+    if (err instanceof DOMException && err.name === 'InvalidStateError' && persisted) {
+      throw new Error(`写入（${key}）可能已成功，但写后校验受干扰，请重新读取文件确认最新内容`);
+    }
+    if (!persisted && err instanceof DOMException && err.name === 'InvalidStateError') {
+      try {
+        return await attempt();
+      } catch (retryErr) {
+        // 仅重试仍因快照冲突失败时才归因为「正被其他程序修改」；其余错误原样抛出，避免误导排障
+        if (retryErr instanceof DOMException && retryErr.name === 'InvalidStateError' && !persisted) {
+          const wrapped = new Error(
+            `写入失败（${key}）：文件正被其他程序或另一标签页修改，请关闭重复打开的本页面后重试`,
+          );
+          (wrapped as Error & { cause?: unknown }).cause = retryErr; // 保留原始错误链（target ES2020 无 Error cause 构造签名）
+          throw wrapped;
+        }
+        if (retryErr instanceof DOMException && retryErr.name === 'InvalidStateError' && persisted) {
+          // 重试写入已落盘、仅回读受扰：同上，不引导重试
+          throw new Error(`写入（${key}）可能已成功，但写后校验受干扰，请重新读取文件确认最新内容`);
+        }
+        throw retryErr;
+      }
     }
     throw err;
   }
-  // 写后回读验证
-  const written = await (await handle.getFile()).text();
-  if (written !== next) {
-    throw new Error(`写后回读校验失败（${key}），文件内容与预期不一致`);
-  }
-  return written;
 }

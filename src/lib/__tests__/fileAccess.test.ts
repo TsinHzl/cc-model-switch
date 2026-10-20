@@ -15,9 +15,12 @@ function makeHandle(opts: {
   reads: string[];
   failCreateWritable?: (n: number) => boolean;
   failRead?: (n: number) => boolean;
+  /** close 在完成落盘后仍抛 InvalidStateError（模拟 swap-file rename 已完成但 close reject） */
+  failClose?: (n: number) => boolean;
 }) {
   let readCount = 0;
   let writeCount = 0;
+  let closeCount = 0;
   let disk = opts.reads[0] ?? '';
   const written: string[] = [];
   const handle = {
@@ -36,7 +39,9 @@ function makeHandle(opts: {
           written.push(data);
         }),
         close: vi.fn(async () => {
+          const n = closeCount++;
           disk = written[written.length - 1] ?? disk; // 模拟落盘：磁盘内容变为最后写入值
+          if (opts.failClose?.(n)) throw invalidState();
         }),
         abort: vi.fn(async () => {}),
       };
@@ -70,7 +75,8 @@ describe('writeFileAtomic InvalidStateError 重试', () => {
   it('重试再抛 InvalidStateError → 中文包装错误且带 cause', async () => {
     const { handle } = makeHandle({ reads: ['old'], failCreateWritable: () => true });
     vi.mocked(loadHandle).mockResolvedValue(handle as never);
-    const err = (await writeFileAtomic('config', (s) => s).catch((e) => e)) as Error;
+    // 非幂等 transform：磁盘恒为 old，收敛检测不通过（恒等 transform 会因磁盘已在目标状态而直接成功）
+    const err = (await writeFileAtomic('config', (s) => `next(${s})`).catch((e) => e)) as Error;
     expect(err.message).toContain('文件正被其他程序或另一标签页修改');
     expect((err as Error & { cause?: unknown }).cause).toBeInstanceOf(DOMException);
     expect(handle.createWritable).toHaveBeenCalledTimes(2);
@@ -99,28 +105,43 @@ describe('writeFileAtomic InvalidStateError 重试', () => {
     expect(handle.createWritable).toHaveBeenCalledTimes(1);
   });
 
-  it('close 已落盘后回读抛 InvalidStateError → 不重试（防 transform 二次应用）', async () => {
-    // failRead 序列：第 0 次（写前读）成功，第 1 次（写后回读）抛 InvalidStateError
+  it('close 已落盘后回读抛 InvalidStateError → 延迟重读成功，正常返回（不再误报「可能已成功」）', async () => {
+    // failRead 序列：第 0 次（写前读）成功，第 1 次（写后回读）抛 InvalidStateError，第 2 次（延迟重读）成功
     const { handle, written } = makeHandle({ reads: ['old'], failRead: (n) => n === 1 });
     vi.mocked(loadHandle).mockResolvedValue(handle as never);
-    const err = (await writeFileAtomic('config', (latest) => `next(${latest})`).catch((e) => e)) as Error;
-    // 写入只发生一次，transform 未被二次应用；已落盘错误包装为「可能已成功」文案（不裸抛、不引导重试）
+    const out = await writeFileAtomic('config', (latest) => `next(${latest})`);
+    expect(out).toBe('next(old)');
     expect(written).toEqual(['next(old)']);
     expect(handle.createWritable).toHaveBeenCalledTimes(1);
-    expect(err).toBeInstanceOf(Error);
-    expect(err.message).toContain('可能已成功');
-    expect(err.message).not.toContain('正被其他程序');
+    expect(handle.getFile).toHaveBeenCalledTimes(3);
   });
 
-  it('重试写入已落盘后回读抛 InvalidStateError → 提示「可能已成功」而非引导重试', async () => {
-    // 第 0 次 createWritable 抛错触发重试；第 2 次 getFile（重试的写后回读）抛 InvalidStateError
-    const { handle, written } = makeHandle({ reads: ['old'], failCreateWritable: (n) => n === 0, failRead: (n) => n === 2 });
+  it('close 落盘后抛 InvalidStateError + 重试再抛 + 磁盘已收敛 → 以磁盘内容判定成功返回', async () => {
+    // 首次 close：落盘成功但抛错（swap-file rename 已完成）→ 重试 createWritable 再抛 → 收敛检测
+    // disk 此时已是 'target|old'，幂等 transform 再应用无变化，判定已处于目标状态
+    const idempotent = (s: string) => (s.startsWith('target') ? s : `target|${s}`);
+    const { handle, written } = makeHandle({
+      reads: ['old'],
+      failClose: (n) => n === 0,
+      failCreateWritable: (n) => n === 1, // 仅拦截重试（首次需走到 close 落盘）
+    });
     vi.mocked(loadHandle).mockResolvedValue(handle as never);
-    const err = (await writeFileAtomic('config', (latest) => `next(${latest})`).catch((e) => e)) as Error;
-    expect(err.message).toContain('可能已成功');
-    expect(err.message).not.toContain('正被其他程序');
-    expect(written).toEqual(['next(old)']);
-    expect(handle.createWritable).toHaveBeenCalledTimes(2);
+    const out = await writeFileAtomic('config', idempotent);
+    expect(out).toBe('target|old');
+    expect(written).toEqual(['target|old']); // 实际写入只发生一次，transform 未被二次应用
+  });
+
+  it('收敛检测读取本身受扰 → 仍按失败报「正被其他程序修改」', async () => {
+    // 首次 createWritable 抛 → 重试的写前读即抛 → 收敛检测的重读（含延迟重试）也全抛 → 不误判成功
+    const { handle } = makeHandle({
+      reads: ['old'],
+      failCreateWritable: (n) => n === 0,
+      failRead: (n) => n >= 1,
+    });
+    vi.mocked(loadHandle).mockResolvedValue(handle as never);
+    const err = (await writeFileAtomic('config', (s) => s).catch((e) => e)) as Error;
+    expect(err.message).toContain('正被其他程序或另一标签页修改');
+    expect((err as Error & { cause?: unknown }).cause).toBeInstanceOf(DOMException);
   });
 });
 

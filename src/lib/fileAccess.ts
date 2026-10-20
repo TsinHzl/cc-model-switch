@@ -95,23 +95,29 @@ export async function isFullyAuthorized(): Promise<boolean> {
   return true;
 }
 
+/** getFile + text：swap-file rename 后句柄快照短暂失效，InvalidStateError 时延迟重读一次 */
+async function getFileTextWithRetry(handle: FileSystemFileHandleLike): Promise<string> {
+  try {
+    return await (await handle.getFile()).text();
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'InvalidStateError') {
+      await new Promise((r) => setTimeout(r, 50));
+      return (await handle.getFile()).text();
+    }
+    throw err;
+  }
+}
+
 /** 读取文件全文（每次调用都从磁盘取最新内容） */
 export async function readFileText(key: FileKey): Promise<string> {
   const handle = await getAuthorizedHandle(key);
   try {
-    return await (await handle.getFile()).text();
+    return await getFileTextWithRetry(handle);
   } catch (err) {
-    // getFile 在文件刚被写入方换名替换后可能短暂抛 InvalidStateError（createWritable close 走临时文件+rename），
-    // 稍候重读一次即可恢复；仍失败才报错
     if (err instanceof DOMException && err.name === 'InvalidStateError') {
-      await new Promise((r) => setTimeout(r, 50));
-      try {
-        return await (await handle.getFile()).text();
-      } catch (retryErr) {
-        const wrapped = new Error(`读取 ${key} 失败：文件刚被其他程序或另一标签页修改，请重试`);
-        (wrapped as Error & { cause?: unknown }).cause = retryErr;
-        throw wrapped;
-      }
+      const wrapped = new Error(`读取 ${key} 失败：文件刚被其他程序或另一标签页修改，请重试`);
+      (wrapped as Error & { cause?: unknown }).cause = err;
+      throw wrapped;
     }
     throw err;
   }
@@ -119,7 +125,11 @@ export async function readFileText(key: FileKey): Promise<string> {
 
 /**
  * 原子写入：写前先从磁盘重读最新内容交由 transform 增量修改，close() 才落盘。
- * transform 必须为纯函数且幂等——写入冲突（InvalidStateError）重试时会被调用多次。
+ * transform 契约：
+ * 1. 纯函数——写前读与写后回读均基于磁盘内容，不得依赖页面内存副本；
+ * 2. 幂等——写入冲突（InvalidStateError）重试时会被调用多次，重复应用结果一致；
+ * 3. 不动点集合 = 目标状态集合——transform(s) === s 当且仅当 s 已处于本调用目标状态
+ *    （set-field 型天然满足；否则收敛检测会把「碰巧不动」的非目标态误判为成功）。
  */
 export async function writeFileAtomic(
   key: FileKey,
@@ -146,7 +156,7 @@ export async function writeFileAtomic(
     }
     persisted = true;
     // 写后回读验证
-    const written = await (await handle.getFile()).text();
+    const written = await getFileTextWithRetry(handle);
     if (written !== next) {
       throw new Error(`写后回读校验失败（${key}），文件内容与预期不一致`);
     }
@@ -168,6 +178,14 @@ export async function writeFileAtomic(
       } catch (retryErr) {
         // 仅重试仍因快照冲突失败时才归因为「正被其他程序修改」；其余错误原样抛出，避免误导排障
         if (retryErr instanceof DOMException && retryErr.name === 'InvalidStateError' && !persisted) {
+          // close() 抛 InvalidStateError ≠ 未落盘：swap-file 的 rename 可能已完成（数据已写入）。
+          // 以磁盘内容收敛判定——transform 幂等，若对当前磁盘再应用 transform 已无变化，说明已处于目标状态
+          try {
+            const disk = await getFileTextWithRetry(handle);
+            if (transform(disk) === disk) return disk;
+          } catch {
+            /* 收敛检测本身受扰 → 按失败报错 */
+          }
           const wrapped = new Error(
             `写入失败（${key}）：文件正被其他程序或另一标签页修改，请关闭重复打开的本页面后重试`,
           );

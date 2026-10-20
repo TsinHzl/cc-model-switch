@@ -98,8 +98,23 @@ export async function isFullyAuthorized(): Promise<boolean> {
 /** 读取文件全文（每次调用都从磁盘取最新内容） */
 export async function readFileText(key: FileKey): Promise<string> {
   const handle = await getAuthorizedHandle(key);
-  const file = await handle.getFile();
-  return file.text();
+  try {
+    return await (await handle.getFile()).text();
+  } catch (err) {
+    // getFile 在文件刚被写入方换名替换后可能短暂抛 InvalidStateError（createWritable close 走临时文件+rename），
+    // 稍候重读一次即可恢复；仍失败才报错
+    if (err instanceof DOMException && err.name === 'InvalidStateError') {
+      await new Promise((r) => setTimeout(r, 50));
+      try {
+        return await (await handle.getFile()).text();
+      } catch (retryErr) {
+        const wrapped = new Error(`读取 ${key} 失败：文件刚被其他程序或另一标签页修改，请重试`);
+        (wrapped as Error & { cause?: unknown }).cause = retryErr;
+        throw wrapped;
+      }
+    }
+    throw err;
+  }
 }
 
 /**

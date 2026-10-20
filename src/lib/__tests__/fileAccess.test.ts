@@ -1,4 +1,4 @@
-/* writeFileAtomic 重试路径单测：mock 授权句柄注入 InvalidStateError */
+/* writeFileAtomic / readFileText 重试路径单测：mock 授权句柄注入 InvalidStateError */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 // writeFileAtomic 依赖链：getAuthorizedHandle → loadHandle（IndexedDB），此处 mock 掉存储层
@@ -47,7 +47,7 @@ function makeHandle(opts: {
   return { handle, written };
 }
 
-const { writeFileAtomic } = await import('../fileAccess');
+const { writeFileAtomic, readFileText } = await import('../fileAccess');
 const { loadHandle } = await import('../handleStore');
 
 beforeEach(() => {
@@ -121,5 +121,25 @@ describe('writeFileAtomic InvalidStateError 重试', () => {
     expect(err.message).not.toContain('正被其他程序');
     expect(written).toEqual(['next(old)']);
     expect(handle.createWritable).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('readFileText InvalidStateError 重试', () => {
+  it('首次 getFile 抛 InvalidStateError → 延迟重读成功返回内容', async () => {
+    // failRead 第 0 次抛错，第 1 次（重试）成功
+    const { handle } = makeHandle({ reads: ['disk-content'], failRead: (n) => n === 0 });
+    vi.mocked(loadHandle).mockResolvedValue(handle as never);
+    const out = await readFileText('config');
+    expect(out).toBe('disk-content');
+    expect(handle.getFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('两次 getFile 都抛 InvalidStateError → 中文包装错误且带 cause', async () => {
+    const { handle } = makeHandle({ reads: ['x'], failRead: () => true });
+    vi.mocked(loadHandle).mockResolvedValue(handle as never);
+    const err = (await readFileText('config').catch((e) => e)) as Error;
+    expect(err.message).toContain('读取 config 失败');
+    expect((err as Error & { cause?: unknown }).cause).toBeInstanceOf(DOMException);
+    expect(handle.getFile).toHaveBeenCalledTimes(2);
   });
 });

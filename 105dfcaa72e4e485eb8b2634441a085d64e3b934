@@ -1,0 +1,27 @@
+src/components/EntryForm.tsx
+  2cd26988f1e73403 4,25,36,41,95-100
+src/lib/__tests__/configEditorPreset.test.ts
+  2cd26988f1e73403 51-59
+src/components/ModelSwitch.tsx
+  2cd26988f1e73403 132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "105dfcaa72e4e485eb8b2634441a085d64e3b934",
+  "prompts": {
+    "2cd26988f1e73403": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "92e2e0b6-e051-40dc-a482-ecb7edac9581",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 20,
+      "overriden_lines": 0
+    }
+  }
+}

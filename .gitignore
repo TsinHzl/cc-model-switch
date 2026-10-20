@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.server.log
+.server.pid
+tsconfig.tsbuildinfo
+.playwright-mcp/

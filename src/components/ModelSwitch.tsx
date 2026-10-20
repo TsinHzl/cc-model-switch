@@ -47,6 +47,16 @@ export default function ModelSwitch() {
     }
   };
 
+  /** 复制条目 API Key 到剪贴板，成功/失败均 toast 反馈 */
+  const copyKey = async (entry: ConfigEntry) => {
+    try {
+      await navigator.clipboard.writeText(entry.key);
+      showToast('ok', `已复制 ${entry.model} 的 API Key`);
+    } catch (err) {
+      showToast('err', `复制失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
   /** 基于磁盘最新内容做增量修改（防外部并发编辑被覆盖）；带写前三元组一致性校验（防 index 漂移） */
   const mutateDisk = useCallback(
     async (
@@ -110,6 +120,7 @@ export default function ModelSwitch() {
             onEdit={(index, entry) => setEditing({ kind: 'edit', item: { entry, index } })}
             onDelete={(index, entry) => setDeleting({ index, entry })}
             onAdd={(preset) => setEditing({ kind: 'add', preset })}
+            onCopyKey={(entry) => void copyKey(entry)}
           />
         </>
       )}
@@ -177,6 +188,7 @@ function GroupList({
   onEdit,
   onDelete,
   onAdd,
+  onCopyKey,
 }: {
   groups: GroupedConfig[];
   activeIndex: number;
@@ -185,6 +197,7 @@ function GroupList({
   onEdit: (index: number, entry: ConfigEntry) => void;
   onDelete: (index: number, entry: ConfigEntry) => void;
   onAdd: (preset: AddPreset) => void;
+  onCopyKey: (entry: ConfigEntry) => void;
 }) {
   return (
     <div className="groups">
@@ -243,6 +256,16 @@ function GroupList({
                         <code className="model-key">{showKeys ? entry.key : maskKey(entry.key)}</code>
                         {active ? <span className="badge">当前</span> : <span className="badge badge-ghost">切换</span>}
                         <span className="item-actions" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            className="btn btn-sm"
+                            title="复制该条目的 API Key"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onCopyKey(entry);
+                            }}
+                          >
+                            复制
+                          </button>
                           <button
                             className="btn btn-sm"
                             onClick={(e) => {

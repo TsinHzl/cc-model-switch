@@ -1,0 +1,23 @@
+CLAUDE.md
+  2cd26988f1e73403 1-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "8bbd7a211b915ee386d2451faa0de931f65b992e",
+  "prompts": {
+    "2cd26988f1e73403": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "92e2e0b6-e051-40dc-a482-ecb7edac9581",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 69,
+      "total_deletions": 0,
+      "accepted_lines": 69,
+      "overriden_lines": 0
+    }
+  }
+}

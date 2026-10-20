@@ -266,7 +266,7 @@
 
 .badge-ghost {
   background: transparent;
-  color: var(--text-muted);
+  color: var(--accent);
   border: 1px solid var(--border);
 }
 

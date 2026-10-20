@@ -205,7 +205,7 @@ function GroupList({
         <section className="group-card" key={g.url}>
           <div className="group-url-row">
             <h2 className="group-url">{g.url}</h2>
-            <button className="btn btn-sm" title="在该 URL 下新增配置" onClick={() => onAdd({ baseUrl: g.url })}>
+            <button className="btn btn-sm btn-primary" title="在该 URL 下新增配置" onClick={() => onAdd({ baseUrl: g.url })}>
               ＋ 新增
             </button>
           </div>
@@ -214,7 +214,7 @@ function GroupList({
               <div className="channel-row">
                 <h3 className="channel-name">{c.channel}</h3>
                 <button
-                  className="btn btn-sm"
+                  className="btn btn-sm btn-primary"
                   title="在该渠道下新增配置（Base URL、渠道与 key 锁定）"
                   onClick={() =>
                     onAdd({

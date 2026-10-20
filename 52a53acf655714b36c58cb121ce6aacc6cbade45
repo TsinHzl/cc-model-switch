@@ -1,0 +1,25 @@
+src/lib/fileAccess.ts
+  27a0fc4ca52238b9 101-117
+src/lib/__tests__/fileAccess.test.ts
+  27a0fc4ca52238b9 1,50,126-145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "52a53acf655714b36c58cb121ce6aacc6cbade45",
+  "prompts": {
+    "27a0fc4ca52238b9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a4c454e-d9de-4ca5-9de7-00449f420c5e",
+        "model": "glm-5.3"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 39,
+      "total_deletions": 4,
+      "accepted_lines": 39,
+      "overriden_lines": 0
+    }
+  }
+}

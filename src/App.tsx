@@ -1,7 +1,5 @@
-import { useState } from 'react';
 import Gate from './components/Gate';
 import ModelSwitch from './components/ModelSwitch';
-import ConfigEditor from './components/ConfigEditor';
 import { detectEnvironment } from './lib/fsaTypes';
 
 const env = detectEnvironment();
@@ -33,17 +31,7 @@ export default function App() {
 
   return (
     <Gate>
-      <Main />
+      <ModelSwitch />
     </Gate>
-  );
-}
-
-/** 双 Tab 切换（无路由）：模型切换 / 配置管理 */
-function Main() {
-  const [tab, setTab] = useState<'switch' | 'editor'>('switch');
-  return tab === 'switch' ? (
-    <ModelSwitch onOpenEditor={() => setTab('editor')} />
-  ) : (
-    <ConfigEditor onBack={() => setTab('switch')} />
   );
 }

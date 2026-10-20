@@ -218,6 +218,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   text-align: left;
+  cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
 }
 
@@ -434,15 +435,6 @@
 .btn-sm {
   padding: 4px 10px;
   font-size: 12px;
-}
-
-.model-item.static {
-  cursor: default;
-}
-
-.model-item.static:hover {
-  background: var(--bg-card);
-  border-color: var(--border);
 }
 
 .item-actions {

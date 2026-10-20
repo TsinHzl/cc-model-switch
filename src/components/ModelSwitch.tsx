@@ -1,30 +1,37 @@
-/* 模型切换界面：分组列表 / 激活高亮 / 写入位置选择 / 确认弹窗 / 执行反馈 */
-import { useMemo, useState } from 'react';
+/* 模型切换 + 配置管理单页：分组列表 / 激活高亮 / 内联增删改 / 写入位置选择 / 确认弹窗 / 执行反馈 */
+import { useCallback, useMemo, useState } from 'react';
 import { useConfigState, type WriteTarget } from '../lib/configStore';
-import { authorizeFile, FILE_METAS, reauthorize } from '../lib/fileAccess';
+import { authorizeFile, FILE_METAS, reauthorize, writeFileAtomic } from '../lib/fileAccess';
 import type { ConfigEntry } from '../lib/applyConfig';
 import type { GroupedConfig } from '../lib/configModel';
+import { maskKey } from '../lib/maskKey';
+import { EntryForm, type EditMode, type AddPreset } from './EntryForm';
+import { ConfirmDelete } from './ConfirmDelete';
 
-/** key 脱敏：保留前 6 后 4；短 key（≤12 位）按长度缩进保留量，不再整串明文 */
-export function maskKey(key: string): string {
-  if (key.length <= 4) return '•'.repeat(key.length);
-  const head = key.slice(0, Math.min(6, Math.max(3, key.length - 2)));
-  const tail = key.slice(-Math.min(4, Math.max(2, key.length - 3)));
-  return `${head}${'•'.repeat(Math.min(12, Math.max(4, key.length - head.length - tail.length)))}${tail}`;
+/** 写回磁盘：保持 4 空格缩进 + 末尾换行（与现有手工编辑格式一致） */
+function serializeConfigs(entries: ConfigEntry[]): string {
+  return `${JSON.stringify(entries, null, 4)}\n`;
 }
 
-export default function ModelSwitch({ onOpenEditor }: { onOpenEditor: () => void }) {
+/** 三元组相等（与激活判定同口径） */
+function sameEntry(a: ConfigEntry, b: ConfigEntry): boolean {
+  return a.model === b.model && a.base_url === b.base_url && a.key === b.key;
+}
+
+export default function ModelSwitch() {
   const { status, reload, applyModel } = useConfigState();
   const [showKeys, setShowKeys] = useState(false);
   const [pending, setPending] = useState<ConfigEntry | null>(null);
   const [target, setTarget] = useState<WriteTarget>('zshrc');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [editing, setEditing] = useState<EditMode>(null);
+  const [deleting, setDeleting] = useState<{ entry: ConfigEntry; index: number } | null>(null);
 
-  const showToast = (kind: 'ok' | 'err', text: string) => {
+  const showToast = useCallback((kind: 'ok' | 'err', text: string) => {
     setToast({ kind, text });
     window.setTimeout(() => setToast(null), 4000);
-  };
+  }, []);
 
   const confirmApply = async () => {
     if (!pending) return;
@@ -40,6 +47,33 @@ export default function ModelSwitch({ onOpenEditor }: { onOpenEditor: () => void
     }
   };
 
+  /** 基于磁盘最新内容做增量修改（防外部并发编辑被覆盖）；带写前三元组一致性校验（防 index 漂移） */
+  const mutateDisk = useCallback(
+    async (
+      mutator: (latest: ConfigEntry[]) => ConfigEntry[],
+      expect: { index: number; entry: ConfigEntry } | null,
+      successText: string,
+    ) => {
+      try {
+        await writeFileAtomic('config', (latest) => {
+          const parsed = JSON.parse(latest) as ConfigEntry[];
+          if (expect) {
+            const current = parsed[expect.index];
+            if (!current || !sameEntry(current, expect.entry)) {
+              throw new Error('文件已被外部修改，所选条目位置变化——已中止写入，请刷新后重试');
+            }
+          }
+          return serializeConfigs(mutator(parsed));
+        });
+        await reload();
+        showToast('ok', successText);
+      } catch (err) {
+        showToast('err', err instanceof Error ? err.message : String(err));
+      }
+    },
+    [reload, showToast],
+  );
+
   return (
     <div className="page">
       <header className="page-header">
@@ -54,8 +88,8 @@ export default function ModelSwitch({ onOpenEditor }: { onOpenEditor: () => void
           <button className="btn" onClick={() => void reload()}>
             ⟳ 刷新
           </button>
-          <button className="btn" onClick={onOpenEditor}>
-            ✎ 配置管理
+          <button className="btn btn-primary" onClick={() => setEditing({ kind: 'add' })}>
+            ＋ 新增配置
           </button>
         </div>
       </header>
@@ -64,12 +98,20 @@ export default function ModelSwitch({ onOpenEditor }: { onOpenEditor: () => void
       {status.kind === 'error' && <ErrorPane message={status.message} needAuth={status.needAuth} onRetry={reload} />}
       {status.kind === 'json-error' && <JsonErrorPane raw={status.raw} />}
       {status.kind === 'ready' && (
-        <GroupList
-          groups={status.state.groups}
-          activeIndex={status.state.activeIndex}
-          showKeys={showKeys}
-          onPick={setPending}
-        />
+        <>
+          <p className="hint">
+            共 {status.state.entries.length} 条 · {status.state.groups.length} 个 URL 分组
+          </p>
+          <GroupList
+            groups={status.state.groups}
+            activeIndex={status.state.activeIndex}
+            showKeys={showKeys}
+            onPick={setPending}
+            onEdit={(index, entry) => setEditing({ kind: 'edit', item: { entry, index } })}
+            onDelete={(index, entry) => setDeleting({ index, entry })}
+            onAdd={(preset) => setEditing({ kind: 'add', preset })}
+          />
+        </>
       )}
 
       {pending && (
@@ -83,6 +125,44 @@ export default function ModelSwitch({ onOpenEditor }: { onOpenEditor: () => void
           onConfirm={() => void confirmApply()}
         />
       )}
+
+      {editing && (
+        <EntryForm
+          mode={editing}
+          onCancel={() => setEditing(null)}
+          onSubmit={async (entry) => {
+            const mode = editing;
+            setEditing(null);
+            if (mode.kind === 'add') {
+              await mutateDisk((list) => [...list, entry], null, `已新增 ${entry.model}`);
+            } else {
+              await mutateDisk(
+                (list) => list.map((e, i) => (i === mode.item.index ? entry : e)),
+                { index: mode.item.index, entry: mode.item.entry },
+                `已保存 ${entry.model}`,
+              );
+            }
+          }}
+        />
+      )}
+
+      {deleting && (
+        <ConfirmDelete
+          entry={deleting.entry}
+          showKeys={showKeys}
+          onCancel={() => setDeleting(null)}
+          onConfirm={async () => {
+            const item = deleting;
+            setDeleting(null);
+            await mutateDisk(
+              (list) => list.filter((_, i) => i !== item.index),
+              { index: item.index, entry: item.entry },
+              `已删除 ${item.entry.model}`,
+            );
+          }}
+        />
+      )}
+
       {toast && <div className={`toast toast-${toast.kind}`}>{toast.text}</div>}
     </div>
   );
@@ -93,37 +173,89 @@ function GroupList({
   activeIndex,
   showKeys,
   onPick,
+  onEdit,
+  onDelete,
+  onAdd,
 }: {
   groups: GroupedConfig[];
   activeIndex: number;
   showKeys: boolean;
   onPick: (entry: ConfigEntry) => void;
+  onEdit: (index: number, entry: ConfigEntry) => void;
+  onDelete: (index: number, entry: ConfigEntry) => void;
+  onAdd: (preset: AddPreset) => void;
 }) {
   return (
     <div className="groups">
       {groups.map((g) => (
         <section className="group-card" key={g.url}>
-          <h2 className="group-url">{g.url}</h2>
+          <div className="group-url-row">
+            <h2 className="group-url">{g.url}</h2>
+            <button className="btn btn-sm" title="在该 URL 下新增配置" onClick={() => onAdd({ baseUrl: g.url })}>
+              ＋ 新增
+            </button>
+          </div>
           {g.channels.map((c) => (
             <div className="channel" key={c.channel}>
-              <h3 className="channel-name">{c.channel}</h3>
+              <div className="channel-row">
+                <h3 className="channel-name">{c.channel}</h3>
+                <button
+                  className="btn btn-sm"
+                  title="在该渠道下新增配置（Base URL 与渠道锁定）"
+                  onClick={() => onAdd({ baseUrl: g.url, channel: c.channel === '默认渠道' ? '' : c.channel })}
+                >
+                  ＋ 新增
+                </button>
+              </div>
               <ul className="model-list">
                 {c.items.map(({ entry, index }) => {
-                  // index 是原数组下标（分组结构携带），激活判定与 key 均基于它
                   const active = index === activeIndex;
                   return (
                     <li key={index}>
-                      <button
+                      <div
                         className={`model-item${active ? ' active' : ''}`}
+                        role="button"
+                        tabIndex={0}
                         onClick={() => onPick(entry)}
+                        onKeyDown={(e) => {
+                          if (e.target !== e.currentTarget) return;
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            onPick(entry);
+                          }
+                        }}
                       >
                         <span className="model-name">
-                          {active && <span className="active-dot" title="当前激活">●</span>}
+                          {active && (
+                            <span className="active-dot" title="当前激活">
+                              ●
+                            </span>
+                          )}
                           {entry.model}
                         </span>
                         <code className="model-key">{showKeys ? entry.key : maskKey(entry.key)}</code>
                         {active ? <span className="badge">当前</span> : <span className="badge badge-ghost">切换</span>}
-                      </button>
+                        <span className="item-actions" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            className="btn btn-sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEdit(index, entry);
+                            }}
+                          >
+                            编辑
+                          </button>
+                          <button
+                            className="btn btn-sm btn-danger"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDelete(index, entry);
+                            }}
+                          >
+                            删除
+                          </button>
+                        </span>
+                      </div>
                     </li>
                   );
                 })}
@@ -154,7 +286,7 @@ function ConfirmDialog({
   onConfirm: () => void;
 }) {
   return (
-    <div className="modal-mask" role="dialog" aria-modal>
+    <div className="modal-mask" role="dialog" aria-modal="true">
       <div className="modal">
         <h2>确认切换</h2>
         <dl className="confirm-grid">
@@ -253,7 +385,9 @@ function ErrorPane({
             <button className="btn btn-primary" onClick={() => void doAuthorize()} disabled={authorizing}>
               {authorizing ? `授权中… ${authStep}` : '重新授权 / 授权文件'}
             </button>
-            <button className="btn" onClick={onRetry}>重试</button>
+            <button className="btn" onClick={onRetry}>
+              重试
+            </button>
           </div>
         </>
       )}

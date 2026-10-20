@@ -1,6 +1,6 @@
 /* resolveAddPreset 预设解析单测：URL 入口 / 渠道入口 / 默认渠道三条条件路径 */
 import { describe, expect, it } from 'vitest';
-import { resolveAddPreset } from '../../components/ConfigEditor';
+import { resolveAddPreset } from '../../components/EntryForm';
 
 describe('resolveAddPreset', () => {
   it('URL 入口（仅 baseUrl）→ base_url 锁定预填，渠道留空可自由填写', () => {

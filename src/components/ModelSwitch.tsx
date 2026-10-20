@@ -129,6 +129,7 @@ export default function ModelSwitch() {
       {editing && (
         <EntryForm
           mode={editing}
+          showKeys={showKeys}
           onCancel={() => setEditing(null)}
           onSubmit={async (entry) => {
             const mode = editing;
@@ -201,8 +202,14 @@ function GroupList({
                 <h3 className="channel-name">{c.channel}</h3>
                 <button
                   className="btn btn-sm"
-                  title="在该渠道下新增配置（Base URL 与渠道锁定）"
-                  onClick={() => onAdd({ baseUrl: g.url, channel: c.channel === '默认渠道' ? '' : c.channel })}
+                  title="在该渠道下新增配置（Base URL、渠道与 key 锁定）"
+                  onClick={() =>
+                    onAdd({
+                      baseUrl: g.url,
+                      channel: c.channel === '默认渠道' ? '' : c.channel,
+                      key: c.items[0]?.entry.key || undefined,
+                    })
+                  }
                 >
                   ＋ 新增
                 </button>

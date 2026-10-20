@@ -1,0 +1,23 @@
+src/components/ModelSwitch.tsx
+  2cd26988f1e73403 208,217
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "c9bcd1b03f67f30ef5e29723e226eaa5c96e0e1c",
+  "prompts": {
+    "2cd26988f1e73403": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "92e2e0b6-e051-40dc-a482-ecb7edac9581",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 2,
+      "accepted_lines": 2,
+      "overriden_lines": 0
+    }
+  }
+}

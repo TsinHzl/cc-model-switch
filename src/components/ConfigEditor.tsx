@@ -28,7 +28,26 @@ function withMeta(entries: ConfigEntry[]): Item[] {
   return entries.map((entry, index) => ({ entry, index, uid: crypto.randomUUID() }));
 }
 
-type EditMode = { kind: 'add' } | { kind: 'edit'; item: Item } | null;
+/** add 分支的预设锁定：URL 入口锁 base_url；渠道入口锁 base_url + channel */
+interface AddPreset {
+  baseUrl: string;
+  channel?: string;
+}
+
+/** add 预设解析：入口预设 → 表单初始值与锁定字段（纯函数，供单测） */
+export function resolveAddPreset(preset: AddPreset): {
+  initial: ConfigEntry;
+  lockUrl: boolean;
+  lockChannel: boolean;
+} {
+  return {
+    initial: { base_url: preset.baseUrl, key: '', model: '', channel: preset.channel ?? '' },
+    lockUrl: true,
+    lockChannel: preset.channel !== undefined,
+  };
+}
+
+type EditMode = { kind: 'add'; preset?: AddPreset } | { kind: 'edit'; item: Item } | null;
 
 export default function ConfigEditor({ onBack }: { onBack: () => void }) {
   const [items, setItems] = useState<Item[] | null>(null);
@@ -140,10 +159,34 @@ export default function ConfigEditor({ onBack }: { onBack: () => void }) {
 
           {groups.map((g) => (
             <section className="group-card" key={g.url}>
-              <h2 className="group-url">{g.url}</h2>
+              <div className="group-url-row">
+                <h2 className="group-url">{g.url}</h2>
+                <button
+                  className="btn btn-sm"
+                  title="在该 URL 下新增配置"
+                  onClick={() => setEditing({ kind: 'add', preset: { baseUrl: g.url } })}
+                >
+                  ＋ 新增
+                </button>
+              </div>
               {g.channels.map((c) => (
                 <div className="channel" key={c.channel}>
-                  <h3 className="channel-name">{c.channel}</h3>
+                  <div className="channel-row">
+                    <h3 className="channel-name">{c.channel}</h3>
+                    <button
+                      className="btn btn-sm"
+                      title="在该渠道下新增配置（Base URL 与渠道锁定）"
+                      onClick={() =>
+                        setEditing({
+                          kind: 'add',
+                          // 「默认渠道」是空 channel 的展示标签——锁定为空而非写入字面量
+                          preset: { baseUrl: g.url, channel: c.channel === '默认渠道' ? '' : c.channel },
+                        })
+                      }
+                    >
+                      ＋ 新增
+                    </button>
+                  </div>
                   <ul className="model-list">
                     {c.items.map(({ entry }) => {
                       const item = itemByRef.get(entry)!;
@@ -219,13 +262,19 @@ function EntryForm({
   onCancel,
   onSubmit,
 }: {
-  mode: { kind: 'add' } | { kind: 'edit'; item: Item };
+  mode: { kind: 'add'; preset?: AddPreset } | { kind: 'edit'; item: Item };
   onCancel: () => void;
   onSubmit: (entry: ConfigEntry) => Promise<void>;
 }) {
   const initial: ConfigEntry =
     mode.kind === 'edit' ? mode.item.entry : { base_url: '', key: '', model: '', channel: '' };
-  const [form, setForm] = useState<ConfigEntry>(initial);
+  // 预设锁定位：URL 入口锁 base_url（渠道可自由填）；渠道入口 base_url + channel 均锁
+  const presetResolved = mode.kind === 'add' && mode.preset ? resolveAddPreset(mode.preset) : null;
+  const lockUrl = presetResolved?.lockUrl ?? false;
+  const lockChannel = presetResolved?.lockChannel ?? false;
+  // 锁定时首个可填字段是 API Key（保持「打开即可输入」）
+  const focusField: keyof ConfigEntry = lockUrl ? 'key' : 'base_url';
+  const [form, setForm] = useState<ConfigEntry>(presetResolved?.initial ?? initial);
   const [errors, setErrors] = useState<Partial<Record<keyof ConfigEntry, string>>>({});
   const [busy, setBusy] = useState(false);
 
@@ -237,7 +286,8 @@ function EntryForm({
   const validate = (): boolean => {
     const er: Partial<Record<keyof ConfigEntry, string>> = {};
     if (!form.base_url.trim()) er.base_url = '必填';
-    else if (!/^https?:\/\//.test(form.base_url.trim())) er.base_url = '需以 http(s):// 开头';
+    // 锁定的 base_url 由既有分组背书，跳过格式校验（避免锁定非法脏 URL 后无法提交也无法修改的死锁）
+    else if (!lockUrl && !/^https?:\/\//.test(form.base_url.trim())) er.base_url = '需以 http(s):// 开头';
     if (!form.key.trim()) er.key = '必填';
     if (!form.model.trim()) er.model = '必填';
     setErrors(er);
@@ -259,13 +309,17 @@ function EntryForm({
     }
   };
 
-  const field = (label: string, name: keyof ConfigEntry, placeholder: string) => (
+  const field = (label: string, name: keyof ConfigEntry, placeholder: string, locked = false) => (
     <label className="form-field">
       <span>
         {label}
         {name !== 'channel' && <em className="req">*</em>}
       </span>
-      <input value={form[name]} onChange={set(name)} placeholder={placeholder} autoFocus={name === 'base_url'} />
+      {locked ? (
+        <input className="input-locked" value={form[name]} readOnly title="由所属分组带入，不可修改" />
+      ) : (
+        <input value={form[name]} onChange={set(name)} placeholder={placeholder} autoFocus={name === focusField} />
+      )}
       {errors[name] && <em className="field-error">{errors[name]}</em>}
     </label>
   );
@@ -275,10 +329,10 @@ function EntryForm({
       <div className="modal">
         <h2>{mode.kind === 'add' ? '新增配置' : `编辑：${initial.model}`}</h2>
         <div className="form-grid">
-          {field('Base URL', 'base_url', 'https://example.com')}
+          {field('Base URL', 'base_url', 'https://example.com', lockUrl)}
           {field('API Key', 'key', 'sk-…')}
           {field('模型', 'model', 'claude-opus-5')}
-          {field('渠道（可选）', 'channel', '留空则归入"默认渠道"')}
+          {field('渠道（可选）', 'channel', '留空则归入"默认渠道"', lockChannel)}
         </div>
         <div className="modal-actions">
           <button className="btn" onClick={onCancel} disabled={busy}>

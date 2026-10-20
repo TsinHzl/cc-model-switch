@@ -155,6 +155,42 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* 分组/渠道标题行：标题 + 行内「＋ 新增」按钮两端对齐（下边框/间距由行容器接管） */
+.group-url-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.group-url-row .group-url {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: none;
+}
+
+.channel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.channel-row .channel-name {
+  margin-bottom: 0;
+}
+
+/* 预填锁定输入框：视觉提示只读 */
+.input-locked {
+  opacity: 0.75;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
 .channel + .channel {
   margin-top: 14px;
 }

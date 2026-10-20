@@ -1,0 +1,31 @@
+/* resolveAddPreset 预设解析单测：URL 入口 / 渠道入口 / 默认渠道三条条件路径 */
+import { describe, expect, it } from 'vitest';
+import { resolveAddPreset } from '../../components/ConfigEditor';
+
+describe('resolveAddPreset', () => {
+  it('URL 入口（仅 baseUrl）→ base_url 锁定预填，渠道留空可自由填写', () => {
+    const r = resolveAddPreset({ baseUrl: 'https://kiro2ccproxy.zeabur.app' });
+    expect(r.initial).toEqual({ base_url: 'https://kiro2ccproxy.zeabur.app', key: '', model: '', channel: '' });
+    expect(r.lockUrl).toBe(true);
+    expect(r.lockChannel).toBe(false);
+  });
+
+  it('渠道入口（baseUrl + channel）→ base_url 与渠道均锁定预填', () => {
+    const r = resolveAddPreset({ baseUrl: 'https://kiro2ccproxy.zeabur.app', channel: 'kiro反代cc专属' });
+    expect(r.initial).toEqual({
+      base_url: 'https://kiro2ccproxy.zeabur.app',
+      key: '',
+      model: '',
+      channel: 'kiro反代cc专属',
+    });
+    expect(r.lockUrl).toBe(true);
+    expect(r.lockChannel).toBe(true);
+  });
+
+  it('默认渠道入口（channel 为空串）→ 渠道锁定为空而非写入字面量「默认渠道」', () => {
+    // 「默认渠道」是空 channel 的展示标签，按钮侧已转换为 ''；此处锁定后提交 channel=''，仍归默认渠道分组
+    const r = resolveAddPreset({ baseUrl: 'https://api.example.com', channel: '' });
+    expect(r.initial.channel).toBe('');
+    expect(r.lockChannel).toBe(true);
+  });
+});

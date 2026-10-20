@@ -1,0 +1,23 @@
+.gitignore
+  27a0fc4ca52238b9 1-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "8b48b0fa8915c22d098a6c5372d89648980f89d4",
+  "prompts": {
+    "27a0fc4ca52238b9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a4c454e-d9de-4ca5-9de7-00449f420c5e",
+        "model": "glm-5.3"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 6,
+      "total_deletions": 0,
+      "accepted_lines": 6,
+      "overriden_lines": 0
+    }
+  }
+}

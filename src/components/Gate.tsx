@@ -43,15 +43,6 @@ export default function Gate({ children }: { children: React.ReactNode }) {
 
   if (mode === 'passed') return <>{children}</>;
 
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    padding: '10px 12px',
-    background: 'var(--bg)',
-    border: '1px solid var(--border)',
-    borderRadius: 'var(--radius-sm)',
-    outline: 'none',
-  };
-
   return (
     <main className="gate-main">
       <form
@@ -76,7 +67,6 @@ export default function Gate({ children }: { children: React.ReactNode }) {
           placeholder="密码"
           value={pw}
           onChange={(e) => setPw(e.target.value)}
-          style={inputStyle}
         />
         {mode === 'setup' && (
           <input
@@ -84,7 +74,6 @@ export default function Gate({ children }: { children: React.ReactNode }) {
             placeholder="再次输入密码"
             value={pw2}
             onChange={(e) => setPw2(e.target.value)}
-            style={inputStyle}
           />
         )}
         {error && (

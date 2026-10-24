@@ -46,7 +46,7 @@ export function useConfigState() {
   const [status, setStatus] = useState<LoadStatus>({ kind: 'idle' });
 
   const reload = useCallback(async () => {
-    setStatus({ kind: 'loading' });
+    setStatus((prev) => (prev.kind === 'ready' ? prev : { kind: 'loading' }));
     try {
       setStatus({ kind: 'ready', state: await loadConfigState() });
     } catch (err) {

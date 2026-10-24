@@ -63,6 +63,14 @@ afterEach(() => {
 });
 
 describe('writeFileAtomic InvalidStateError 重试', () => {
+  it('transform 返回与磁盘一致（不动点）→ 短路直接返回，不调用 createWritable', async () => {
+    const { handle } = makeHandle({ reads: ['already-clean'] });
+    vi.mocked(loadHandle).mockResolvedValue(handle as never);
+    const out = await writeFileAtomic('settings', (latest) => latest);
+    expect(out).toBe('already-clean');
+    expect(handle.createWritable).not.toHaveBeenCalled();
+  });
+
   it('首次 createWritable 抛 InvalidStateError → 重试成功返回写入内容', async () => {
     const { handle, written } = makeHandle({ reads: ['old'], failCreateWritable: (n) => n === 0 });
     vi.mocked(loadHandle).mockResolvedValue(handle as never);
@@ -91,7 +99,7 @@ describe('writeFileAtomic InvalidStateError 重试', () => {
       throw new Error('disk full');
     });
     vi.mocked(loadHandle).mockResolvedValue(handle as never);
-    const err = (await writeFileAtomic('config', (s) => s).catch((e) => e)) as Error;
+    const err = (await writeFileAtomic('config', (s) => `next(${s})`).catch((e) => e)) as Error;
     expect(err.message).toBe('disk full');
     expect(handle.createWritable).toHaveBeenCalledTimes(2);
   });
@@ -100,7 +108,7 @@ describe('writeFileAtomic InvalidStateError 重试', () => {
     const { handle } = makeHandle({ reads: ['old'] });
     handle.createWritable.mockRejectedValueOnce(new Error('disk full'));
     vi.mocked(loadHandle).mockResolvedValue(handle as never);
-    const err = (await writeFileAtomic('config', (s) => s).catch((e) => e)) as Error;
+    const err = (await writeFileAtomic('config', (s) => `next(${s})`).catch((e) => e)) as Error;
     expect(err.message).toBe('disk full');
     expect(handle.createWritable).toHaveBeenCalledTimes(1);
   });
@@ -139,7 +147,7 @@ describe('writeFileAtomic InvalidStateError 重试', () => {
       failRead: (n) => n >= 1,
     });
     vi.mocked(loadHandle).mockResolvedValue(handle as never);
-    const err = (await writeFileAtomic('config', (s) => s).catch((e) => e)) as Error;
+    const err = (await writeFileAtomic('config', (s) => `next(${s})`).catch((e) => e)) as Error;
     expect(err.message).toContain('正被其他程序或另一标签页修改');
     expect((err as Error & { cause?: unknown }).cause).toBeInstanceOf(DOMException);
   });

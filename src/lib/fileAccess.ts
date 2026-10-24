@@ -140,8 +140,10 @@ export async function writeFileAtomic(
 
   const attempt = async (): Promise<string> => {
     // 防 stale write：基于磁盘最新内容，而非页面内存副本
-    const latest = await (await handle.getFile()).text();
+    const latest = await getFileTextWithRetry(handle);
     const next = transform(latest);
+    // 磁盘已处于目标状态（不动点）：短路跳过 createWritable，避免对无变更文件触发跨进程写锁冲突
+    if (next === latest) return latest;
     const writable = await handle.createWritable({ keepExistingData: false });
     try {
       await writable.write(next);
@@ -174,6 +176,7 @@ export async function writeFileAtomic(
     }
     if (!persisted && err instanceof DOMException && err.name === 'InvalidStateError') {
       try {
+        await new Promise((r) => setTimeout(r, 50));
         return await attempt();
       } catch (retryErr) {
         // 仅重试仍因快照冲突失败时才归因为「正被其他程序修改」；其余错误原样抛出，避免误导排障

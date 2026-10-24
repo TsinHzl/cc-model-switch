@@ -104,9 +104,20 @@ describe('settings.json env 键管理（jq --indent 2 基准）', () => {
     expect(parsed.other).toBe(1);
   });
 
+  it('含其他 env 键但无 ANTHROPIC_* 键时 clean 原样返回（保留自定义空行格式）', () => {
+    const customFormatted = '{\n  "env": {\n\n    "CLAUDE_CODE_ENABLE_TELEMETRY": "1"\n  }\n}\n';
+    expect(cleanSettingsEnvKeys(customFormatted)).toBe(customFormatted);
+  });
+
   it('无 env 块时 clean 原样返回', () => {
     const noEnv = '{"a":1}\n';
     expect(cleanSettingsEnvKeys(noEnv)).toBe(noEnv);
+  });
+
+  it('applyToSettingsJson 目标 7 键已完全一致时原样返回（满足不动点契约）', () => {
+    const applied = applyToSettingsJson(base, entry);
+    const withCustomBlankLine = applied.replace('"env": {\n', '"env": {\n\n');
+    expect(applyToSettingsJson(withCustomBlankLine, entry)).toBe(withCustomBlankLine);
   });
 
   it('损坏 JSON 抛错（不静默）', () => {

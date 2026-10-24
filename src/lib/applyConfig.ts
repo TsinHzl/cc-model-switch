@@ -58,9 +58,18 @@ export function insertZshrcBlock(zshrc: string, entry: ConfigEntry): string {
 /** settings.json 文本 → env 块中写入 7 键（保留其他内容）；返回新文本 */
 export function applyToSettingsJson(settingsText: string, entry: ConfigEntry): string {
   const parsed = JSON.parse(settingsText) as Record<string, unknown>;
-  const env = (parsed.env && typeof parsed.env === 'object' ? parsed.env : {}) as Record<string, unknown>;
+  const sourceEnv =
+    parsed.env && typeof parsed.env === 'object' && !Array.isArray(parsed.env)
+      ? (parsed.env as Record<string, unknown>)
+      : {};
+  const targetValue = (k: (typeof ANTHROPIC_KEYS)[number]): string =>
+    k === 'ANTHROPIC_BASE_URL' ? entry.base_url : k === 'ANTHROPIC_AUTH_TOKEN' ? entry.key : entry.model;
+  if (ANTHROPIC_KEYS.every((k) => sourceEnv[k] === targetValue(k))) {
+    return settingsText;
+  }
+  const env: Record<string, unknown> = { ...sourceEnv };
   for (const k of ANTHROPIC_KEYS) {
-    env[k] = k === 'ANTHROPIC_BASE_URL' ? entry.base_url : k === 'ANTHROPIC_AUTH_TOKEN' ? entry.key : entry.model;
+    env[k] = targetValue(k);
   }
   const next = { ...parsed, env };
   // jq --indent 2 输出格式：2 空格缩进 + 末尾换行
@@ -70,8 +79,12 @@ export function applyToSettingsJson(settingsText: string, entry: ConfigEntry): s
 /** settings.json 文本 → 删除 env 块中 7 键（对应 sh 脚本 remove_settings_env_keys；env 空则保留空对象） */
 export function cleanSettingsEnvKeys(settingsText: string): string {
   const parsed = JSON.parse(settingsText) as Record<string, unknown>;
-  if (!parsed.env || typeof parsed.env !== 'object') return settingsText;
-  const env = { ...(parsed.env as Record<string, unknown>) };
+  if (!parsed.env || typeof parsed.env !== 'object' || Array.isArray(parsed.env)) return settingsText;
+  const sourceEnv = parsed.env as Record<string, unknown>;
+  if (!ANTHROPIC_KEYS.some((k) => Object.prototype.hasOwnProperty.call(sourceEnv, k))) {
+    return settingsText;
+  }
+  const env = { ...sourceEnv };
   for (const k of ANTHROPIC_KEYS) delete env[k];
   const next = { ...parsed, env };
   return `${JSON.stringify(next, null, 2)}\n`;

@@ -4,9 +4,12 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "predev": "npm run build:domain",
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build:domain": "vite build --config vite.domain.config.ts",
+    "build": "tsc -b && npm run build:domain && vite build",
     "preview": "vite preview",
+    "pretest": "npm run build:domain",
     "test": "vitest run",
     "serve": "node server.mjs"
   },

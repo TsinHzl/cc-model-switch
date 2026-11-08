@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-server/
 .server.log
 .server.pid
 tsconfig.tsbuildinfo

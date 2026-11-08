@@ -1,0 +1,29 @@
+.gitignore
+  98c4f36a379c1547 3
+package.json
+  98c4f36a379c1547 7,9-10,12
+src/lib/serverDomain.ts
+  98c4f36a379c1547 1-2
+vite.domain.config.ts
+  98c4f36a379c1547 1-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "cf235717f8952049343141d2adbe14d0e259901a",
+  "prompts": {
+    "98c4f36a379c1547": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6af1456f-b119-4f36-a785-9aa212f8a96f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 22,
+      "total_deletions": 1,
+      "accepted_lines": 22,
+      "overriden_lines": 0
+    }
+  }
+}

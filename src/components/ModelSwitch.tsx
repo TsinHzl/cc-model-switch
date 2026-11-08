@@ -1,6 +1,6 @@
-/* 模型切换 + 配置管理单页：分组列表 / 激活高亮 / 内联增删改 / 写入位置选择 / 确认弹窗 / 执行反馈 */
+/* 模型切换 + 配置管理单页：分组列表 / 激活高亮 / 内联增删改 / 确认弹窗 / 执行反馈 */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useConfigState, type WriteTarget } from '../lib/configStore';
+import { useConfigState } from '../lib/configStore';
 import { authorizeFile, FILE_METAS, reauthorize, writeFileAtomic } from '../lib/fileAccess';
 import { buildExportLines, type ConfigEntry } from '../lib/applyConfig';
 import type { GroupedConfig } from '../lib/configModel';
@@ -66,7 +66,6 @@ export default function ModelSwitch() {
   const { status, reload, applyModel } = useConfigState();
   const [showKeys, setShowKeys] = useState(false);
   const [pending, setPending] = useState<ConfigEntry | null>(null);
-  const [target, setTarget] = useState<WriteTarget>('zshrc');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [editing, setEditing] = useState<EditMode>(null);
@@ -95,9 +94,9 @@ export default function ModelSwitch() {
     if (!pending) return;
     setBusy(true);
     try {
-      await applyModel(pending, target);
+      await applyModel(pending);
       setPending(null);
-      showToast('ok', `已切换到 ${pending.model}（${target === 'zshrc' ? 'zshrc 标记块' : 'settings.json env'}）`);
+      showToast('ok', `已写入 ${pending.model}（zshrc 标记块）`);
     } catch (err) {
       showToast('err', err instanceof Error ? err.message : String(err));
     } finally {
@@ -177,7 +176,7 @@ export default function ModelSwitch() {
           </div>
           <div className="subtitle">
             <span>
-              与 <code>~/change-ai-config.sh</code> 联动：自动写入 zshrc 标记块与 settings.json env，互斥清理
+              与 <code>~/change-ai-config.sh</code> 共用配置：模型切换仅写入 zshrc 标记块，不修改 settings.json
             </span>
             {status.kind === 'ready' && (
               <span className="stats-badge">
@@ -253,8 +252,6 @@ export default function ModelSwitch() {
       {pending && (
         <ConfirmDialog
           entry={pending}
-          target={target}
-          onTarget={setTarget}
           busy={busy}
           showKeys={showKeys}
           onCancel={() => setPending(null)}
@@ -592,16 +589,12 @@ function GroupList({
 
 function ConfirmDialog({
   entry,
-  target,
-  onTarget,
   busy,
   showKeys,
   onCancel,
   onConfirm,
 }: {
   entry: ConfigEntry;
-  target: WriteTarget;
-  onTarget: (t: WriteTarget) => void;
   busy: boolean;
   showKeys: boolean;
   onCancel: () => void;
@@ -626,25 +619,11 @@ function ConfirmDialog({
           </dd>
           <dt>渠道</dt>
           <dd>{entry.channel || '默认渠道'}</dd>
+          <dt>写入位置</dt>
+          <dd><code>~/.zshrc</code> 标记块</dd>
         </dl>
-        <fieldset className="target-picker">
-          <legend>写入位置</legend>
-          <label className="radio">
-            <input type="radio" name="target" checked={target === 'zshrc'} onChange={() => onTarget('zshrc')} />
-            <span>
-              <strong>~/.zshrc 标记块</strong>
-              <small>块置顶插入，并清理 settings.json env 键</small>
-            </span>
-          </label>
-          <label className="radio">
-            <input type="radio" name="target" checked={target === 'settings'} onChange={() => onTarget('settings')} />
-            <span>
-              <strong>~/.claude/settings.json env</strong>
-              <small>jq 兼容格式写入 7 键，并删除 zshrc 标记块</small>
-            </span>
-          </label>
-        </fieldset>
-        <p className="hint">切换后已打开的终端不会即时生效，新开的 shell / Claude 会话生效。</p>
+        <p className="hint">仅更新 ~/.zshrc 标记块，不修改 settings.json；页面仍优先读取 settings.json。</p>
+        <p className="hint">已打开的终端不会即时生效，请在新开的 shell / Claude 会话中确认配置。</p>
         <div className="modal-actions">
           <button className="btn" onClick={onCancel} disabled={busy}>
             取消

@@ -655,46 +655,6 @@
   border-radius: 4px;
 }
 
-.target-picker {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 0;
-}
-
-.target-picker legend {
-  font-size: 12px;
-  color: var(--text-dim);
-  padding: 0 6px;
-}
-
-.radio {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.radio input {
-  margin-top: 3px;
-  accent-color: var(--accent);
-}
-
-.radio span {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.radio small {
-  color: var(--text-dim);
-  font-size: 11px;
-}
-
 .modal-actions {
   display: flex;
   justify-content: flex-end;

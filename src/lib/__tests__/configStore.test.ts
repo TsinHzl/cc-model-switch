@@ -1,14 +1,14 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { insertZshrcBlock, type ConfigEntry } from '../applyConfig';
-import { loadConfigState, useConfigState } from '../configStore';
-import type { FileKey } from '../fileAccess';
-import { loadHandle } from '../handleStore';
+import type { ConfigEntry } from '../applyConfig';
+import { loadConfigState, useConfigState, type ConfigState } from '../configStore';
+import { ApiError, applyModelConfig, getConfigState } from '../apiClient';
 
-vi.mock('../handleStore', () => ({
-  loadHandle: vi.fn(),
-  saveHandle: vi.fn(),
+vi.mock('../apiClient', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../apiClient')>(),
+  applyModelConfig: vi.fn(),
+  getConfigState: vi.fn(),
 }));
 
 const entry: ConfigEntry = {
@@ -18,111 +18,102 @@ const entry: ConfigEntry = {
   channel: 'test',
 };
 const previous = { ...entry, model: 'previous-model' };
-const settingsText = `${JSON.stringify({
-  env: {
-    ANTHROPIC_MODEL: previous.model,
-    ANTHROPIC_BASE_URL: previous.base_url,
-    ANTHROPIC_AUTH_TOKEN: previous.key,
-    KEEP: 'unchanged',
-  },
-}, null, 4)}\n`;
-
-// 仅替换浏览器文件句柄，保留真实读取、原子写入和配置转换链路。
-function makeFile(name: string, initial: string) {
-  let disk = initial;
-  const handle = {
-    kind: 'file' as const,
-    name,
-    queryPermission: vi.fn(async () => 'granted' as const),
-    requestPermission: vi.fn(async () => 'granted' as const),
-    getFile: vi.fn(async () => new File([disk], name)),
-    createWritable: vi.fn(async () => {
-      let pending = disk;
-      return {
-        write: vi.fn(async (data: BufferSource | Blob | string) => {
-          if (typeof data !== 'string') throw new Error('测试仅支持文本写入');
-          pending = data;
-        }),
-        close: vi.fn(async () => { disk = pending; }),
-        abort: vi.fn(async () => {}),
-      };
-    }),
-  };
-  return { handle, text: () => disk };
-}
+const state: ConfigState = {
+  entries: [previous, entry],
+  groups: [{
+    url: entry.base_url,
+    channels: [{
+      channel: entry.channel,
+      items: [{ entry: previous, index: 0 }, { entry, index: 1 }],
+    }],
+  }],
+  activeIndex: 0,
+};
 
 // 用真实 React 渲染取得回调；不模拟浏览器挂载或断言 UI 生命周期。
-function getApplyModel() {
+function getActions() {
   const captured: ReturnType<typeof useConfigState>[] = [];
   function Probe() {
     captured.push(useConfigState());
     return null;
   }
   renderToStaticMarkup(createElement(Probe));
-  return captured[0]!.applyModel;
+  return captured[0]!;
 }
 
-let files: Record<FileKey, ReturnType<typeof makeFile>>;
-
 beforeEach(() => {
-  vi.clearAllMocks();
-  files = {
-    config: makeFile('change-ai-config.json', JSON.stringify([previous, entry])),
-    settings: makeFile('settings.json', settingsText),
-    zshrc: makeFile('.zshrc', insertZshrcBlock('# shell config\n', previous)),
-  };
-  vi.mocked(loadHandle).mockImplementation(async (key) => {
-    if (key === 'config' || key === 'settings' || key === 'zshrc') {
-      return files[key].handle;
-    }
-    return undefined;
-  });
+  vi.resetAllMocks();
+  vi.mocked(getConfigState).mockResolvedValue(state);
+  vi.mocked(applyModelConfig).mockResolvedValue(undefined);
 });
 
-describe('模型切换仅写 zshrc', () => {
-  it.each([settingsText, '{ "env": { "KEEP": "unchanged" } }\n', '{broken'])(
-    '保留 settings 原始文本，不创建其写入流（用例 %#）',
-    async (text) => {
-      files.settings = makeFile('settings.json', text);
-      const configBefore = files.config.text();
+describe('本机 API 配置状态', () => {
+  it('直接返回服务端分组与激活态，不暴露原始配置文本', async () => {
+    expect(await loadConfigState()).toBe(state);
+    expect(await loadConfigState()).not.toHaveProperty('configText');
+    expect(getConfigState).toHaveBeenCalledTimes(2);
+  });
 
-      await getApplyModel()(entry);
+  it('读取失败保留 API 错误，交由状态层处理', async () => {
+    const error = new ApiError('INVALID_CONFIG', '配置列表格式或写入值无效。');
+    vi.mocked(getConfigState).mockRejectedValueOnce(error);
 
-      expect(files.zshrc.text()).toBe(insertZshrcBlock('# shell config\n', entry));
-      expect(files.zshrc.handle.createWritable).toHaveBeenCalledTimes(1);
-      expect(files.settings.text()).toBe(text);
-      expect(files.settings.handle.createWritable).not.toHaveBeenCalled();
-      expect(files.config.text()).toBe(configBefore);
-      expect(files.config.handle.createWritable).not.toHaveBeenCalled();
+    await expect(loadConfigState()).rejects.toBe(error);
+  });
+
+  it('等待写入成功后才刷新，不预先读取或乐观更改激活态', async () => {
+    let finish!: () => void;
+    vi.mocked(applyModelConfig).mockImplementationOnce(() => new Promise<void>(resolve => {
+      finish = resolve;
+    }));
+
+    const result = getActions().applyModel(entry);
+    expect(applyModelConfig).toHaveBeenCalledExactlyOnceWith(entry);
+    expect(getConfigState).not.toHaveBeenCalled();
+    finish();
+
+    await expect(result).resolves.toBe(true);
+    expect(getConfigState).toHaveBeenCalledTimes(1);
+    expect(state.activeIndex).toBe(0);
+    expect(await loadConfigState()).toBe(state);
+  });
+
+  it.each(['CONFLICT', 'WRITE_UNCERTAIN', 'SESSION_EXPIRED'])(
+    '写入失败 %s 不刷新或重放请求',
+    async code => {
+      const error = new ApiError(code, '安全错误提示');
+      vi.mocked(applyModelConfig).mockRejectedValueOnce(error);
+
+      await expect(getActions().applyModel(entry)).rejects.toBe(error);
+
+      expect(applyModelConfig).toHaveBeenCalledExactlyOnceWith(entry);
+      expect(getConfigState).not.toHaveBeenCalled();
     },
   );
 
-  it('写入失败时透传错误，不尝试修改 settings', async () => {
-    const error = new DOMException('Blocked by browser policy', 'SecurityError');
-    files.zshrc.handle.createWritable.mockRejectedValueOnce(error);
+  it('写入成功但刷新失败时返回 false，不伪装成写入失败或重放', async () => {
+    vi.mocked(getConfigState).mockRejectedValueOnce(
+      new ApiError('NETWORK_ERROR', '无法连接本机服务。'),
+    );
 
-    await expect(getApplyModel()(entry)).rejects.toBe(error);
+    await expect(getActions().applyModel(entry)).resolves.toBe(false);
 
-    expect(files.zshrc.handle.createWritable).toHaveBeenCalledTimes(1);
-    expect(files.settings.handle.createWritable).not.toHaveBeenCalled();
-    expect(files.settings.text()).toBe(settingsText);
+    expect(applyModelConfig).toHaveBeenCalledExactlyOnceWith(entry);
+    expect(getConfigState).toHaveBeenCalledTimes(1);
   });
 
-  it('条目三元组已变更时拒绝写入', async () => {
-    files.config = makeFile('change-ai-config.json', JSON.stringify([{ ...entry, key: 'changed' }]));
+  it('显式刷新成功返回 true，不触发写入', async () => {
+    await expect(getActions().reload()).resolves.toBe(true);
 
-    await expect(getApplyModel()(entry)).rejects.toThrow('配置项已不存在或已被外部修改');
-
-    for (const file of Object.values(files)) {
-      expect(file.handle.createWritable).not.toHaveBeenCalled();
-    }
+    expect(getConfigState).toHaveBeenCalledTimes(1);
+    expect(applyModelConfig).not.toHaveBeenCalled();
   });
 
-  it('保留 settings 优先的当前模型识别', async () => {
-    await getApplyModel()(entry);
+  it('未知刷新异常收敛为失败结果，不触发写入', async () => {
+    vi.mocked(getConfigState).mockRejectedValueOnce(new Error('private-marker'));
 
-    expect((await loadConfigState()).activeIndex).toBe(0);
-    expect(files.zshrc.text()).toBe(insertZshrcBlock('# shell config\n', entry));
-    expect(files.settings.text()).toBe(settingsText);
+    await expect(getActions().reload()).resolves.toBe(false);
+
+    expect(applyModelConfig).not.toHaveBeenCalled();
   });
 });

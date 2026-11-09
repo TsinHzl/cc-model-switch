@@ -1,23 +1,13 @@
 /* 模型切换 + 配置管理单页：分组列表 / 激活高亮 / 内联增删改 / 确认弹窗 / 执行反馈 */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConfigState } from '../lib/configStore';
-import { authorizeFile, FILE_METAS, reauthorize, writeFileAtomic } from '../lib/fileAccess';
+import { ApiError, addEntry, updateEntry, deleteEntry } from '../lib/apiClient';
 import { buildExportLines, type ConfigEntry } from '../lib/applyConfig';
 import type { GroupedConfig } from '../lib/configModel';
 import { maskKey } from '../lib/maskKey';
 import { EntryForm, type EditMode, type AddPreset } from './EntryForm';
 import { ConfirmDelete } from './ConfirmDelete';
 import pkg from '../../package.json';
-
-/** 写回磁盘：保持 4 空格缩进 + 末尾换行（与现有手工编辑格式一致） */
-function serializeConfigs(entries: ConfigEntry[]): string {
-  return `${JSON.stringify(entries, null, 4)}\n`;
-}
-
-/** 三元组相等（与激活判定同口径） */
-function sameEntry(a: ConfigEntry, b: ConfigEntry): boolean {
-  return a.model === b.model && a.base_url === b.base_url && a.key === b.key;
-}
 
 /** 一次性测速：HEAD 优先，失败/不支持回退 GET；AbortController 5s 超时；失败返回 null（显示 —） */
 async function measureLatency(url: string): Promise<number | null> {
@@ -94,11 +84,13 @@ export default function ModelSwitch() {
     if (!pending) return;
     setBusy(true);
     try {
-      await applyModel(pending);
+      const refreshed = await applyModel(pending);
       setPending(null);
-      showToast('ok', `已写入 ${pending.model}（zshrc 标记块）`);
+      const message = `已写入 ${pending.model}（zshrc 标记块）`;
+      showToast(refreshed ? 'ok' : 'err', refreshed
+        ? message : `${message}，但状态刷新失败；请重试读取，不要重复写入。`);
     } catch (err) {
-      showToast('err', err instanceof Error ? err.message : String(err));
+      showToast('err', err instanceof ApiError ? err.message : '操作结果无法确认，请刷新状态核对，不要重复写入。');
     } finally {
       setBusy(false);
     }
@@ -134,28 +126,19 @@ export default function ModelSwitch() {
     }
   };
 
-  /** 基于磁盘最新内容做增量修改（防外部并发编辑被覆盖）；带写前三元组一致性校验（防 index 漂移） */
+  /** 服务端校验最新内容并写入；刷新失败不能当成写入失败。 */
   const mutateDisk = useCallback(
     async (
-      mutator: (latest: ConfigEntry[]) => ConfigEntry[],
-      expect: { index: number; entry: ConfigEntry } | null,
+      mutation: () => Promise<void>,
       successText: string,
     ) => {
       try {
-        await writeFileAtomic('config', (latest) => {
-          const parsed = JSON.parse(latest) as ConfigEntry[];
-          if (expect) {
-            const current = parsed[expect.index];
-            if (!current || !sameEntry(current, expect.entry)) {
-              throw new Error('文件已被外部修改，所选条目位置变化——已中止写入，请刷新后重试');
-            }
-          }
-          return serializeConfigs(mutator(parsed));
-        });
-        await reload();
-        showToast('ok', successText);
+        await mutation();
+        const refreshed = await reload();
+        showToast(refreshed ? 'ok' : 'err', refreshed
+          ? successText : `${successText}，但状态刷新失败；请重试读取，不要重复写入。`);
       } catch (err) {
-        showToast('err', err instanceof Error ? err.message : String(err));
+        showToast('err', err instanceof ApiError ? err.message : '操作结果无法确认，请刷新状态核对，不要重复写入。');
       }
     },
     [reload, showToast],
@@ -212,8 +195,7 @@ export default function ModelSwitch() {
       </header>
 
       {status.kind === 'loading' && <p className="hint">读取中…</p>}
-      {status.kind === 'error' && <ErrorPane message={status.message} needAuth={status.needAuth} onRetry={reload} />}
-      {status.kind === 'json-error' && <JsonErrorPane raw={status.raw} />}
+      {status.kind === 'error' && <ErrorPane message={status.message} code={status.code} onRetry={reload} />}
       {status.kind === 'ready' && (
         <>
           {status.state.activeIndex >= 0 ? (
@@ -268,11 +250,10 @@ export default function ModelSwitch() {
             const mode = editing;
             setEditing(null);
             if (mode.kind === 'add') {
-              await mutateDisk((list) => [...list, entry], null, `已新增 ${entry.model}`);
+              await mutateDisk(() => addEntry(entry), `已新增 ${entry.model}`);
             } else {
               await mutateDisk(
-                (list) => list.map((e, i) => (i === mode.item.index ? entry : e)),
-                { index: mode.item.index, entry: mode.item.entry },
+                () => updateEntry(mode.item.index, mode.item.entry, entry),
                 `已保存 ${entry.model}`,
               );
             }
@@ -289,8 +270,7 @@ export default function ModelSwitch() {
             const item = deleting;
             setDeleting(null);
             await mutateDisk(
-              (list) => list.filter((_, i) => i !== item.index),
-              { index: item.index, entry: item.entry },
+              () => deleteEntry(item.index, item.entry),
               `已删除 ${item.entry.model}`,
             );
           }}
@@ -639,70 +619,28 @@ function ConfirmDialog({
 
 function ErrorPane({
   message,
-  needAuth,
+  code,
   onRetry,
 }: {
   message: string;
-  needAuth: boolean | undefined;
-  onRetry: () => void;
+  code: string;
+  onRetry: () => Promise<boolean>;
 }) {
-  const [authorizing, setAuthorizing] = useState(false);
-  const [authStep, setAuthStep] = useState('');
-  const [authError, setAuthError] = useState('');
-
-  /** 逐文件授权：每个文件一轮点击（picker 消耗 transient activation，一次点击无法连开 3 个选择器）；异常捕获并提示进度，不静默失败 */
-  const doAuthorize = async () => {
-    setAuthorizing(true);
-    setAuthError('');
-    let done = 0;
-    for (const meta of FILE_METAS) {
-      try {
-        setAuthStep(`${done + 1}/${FILE_METAS.length}：请在选择器中打开 ${meta.pathHint}（隐藏文件用 Cmd+Shift+.）`);
-        await reauthorize(meta.key).catch(() => authorizeFile(meta));
-        done += 1;
-      } catch {
-        setAuthError(`已授权 ${done}/${FILE_METAS.length}，${meta.pathHint} 未完成——再次点击按钮继续`);
-        break;
-      }
-    }
-    setAuthorizing(false);
-    setAuthStep('');
-    if (done === FILE_METAS.length) onRetry();
-  };
+  const sessionExpired = code === 'SESSION_EXPIRED';
 
   return (
     <div className="pane pane-error">
-      <h2>无法读取文件</h2>
+      <h2>{sessionExpired ? '本机服务会话已失效' : '无法读取本机配置'}</h2>
       <p>{message}</p>
-      {needAuth !== false && (
-        <>
-          <p className="hint">首次使用需依次授权 3 个文件（每个文件一次点击）；macOS 选择器中按 Cmd+Shift+. 可显示 .zshrc 等隐藏文件。</p>
-          {authError && (
-            <p className="field-error" role="alert">
-              {authError}
-            </p>
-          )}
-          <div className="pane-actions">
-            <button className="btn btn-primary" onClick={() => void doAuthorize()} disabled={authorizing}>
-              {authorizing ? `授权中… ${authStep}` : '重新授权 / 授权文件'}
-            </button>
-            <button className="btn" onClick={onRetry}>
-              重试
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function JsonErrorPane({ raw }: { raw: string }) {
-  const lines = useMemo(() => raw.split('\n').length, [raw]);
-  return (
-    <div className="pane pane-error">
-      <h2>change-ai-config.json 解析失败</h2>
-      <p>JSON 已损坏（{lines} 行），请手工修复该文件后点刷新。</p>
-      <pre className="raw-view">{raw.slice(0, 2000)}</pre>
+      <p className="hint">文件由本机 Node 服务直接读取，无需浏览器文件授权。请检查服务与本地配置后重试。</p>
+      <div className="pane-actions">
+        <button className="btn btn-primary" onClick={() => {
+          if (sessionExpired) window.location.reload();
+          else void onRetry();
+        }}>
+          {sessionExpired ? '刷新网页' : '重试读取'}
+        </button>
+      </div>
     </div>
   );
 }

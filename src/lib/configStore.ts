@@ -1,59 +1,36 @@
-/* 全局配置状态：读三个授权文件 → 解析分组/激活态 → 提供切换入口 */
+/* 全局配置状态：读取本机 API → 展示分组/激活态 → 提供切换入口 */
 import { useCallback, useEffect, useState } from 'react';
-import { readFileText, writeFileAtomic } from './fileAccess';
-import { insertZshrcBlock, type ConfigEntry } from './applyConfig';
-import { groupConfigs, readActive, findActiveIndex, type GroupedConfig } from './configModel';
+import { ApiError, applyModelConfig, getConfigState, type ApiConfigState } from './apiClient';
+import type { ConfigEntry } from './applyConfig';
 
-export interface ConfigState {
-  entries: ConfigEntry[];
-  groups: GroupedConfig[];
-  activeIndex: number;
-  /** 磁盘原始文本（JSON 损坏时用于错误态展示） */
-  configText: string;
-}
+export type ConfigState = ApiConfigState;
 
 export type LoadStatus =
   | { kind: 'idle' }
   | { kind: 'loading' }
   | { kind: 'ready'; state: ConfigState }
-  | { kind: 'error'; message: string; needAuth?: boolean }
-  | { kind: 'json-error'; raw: string };
+  | { kind: 'error'; message: string; code: string };
 
-/** 从磁盘读取三个文件并计算分组与激活态（每次都取最新，防外部修改） */
+/** 服务端每次读取最新文件，保留 settings 优先的激活态。 */
 export async function loadConfigState(): Promise<ConfigState> {
-  const configText = await readFileText('config');
-  let entries: ConfigEntry[];
-  try {
-    entries = JSON.parse(configText) as ConfigEntry[];
-  } catch (err) {
-    throw Object.assign(new Error('change-ai-config.json 不是合法 JSON'), { kind: 'json-error', raw: configText });
-  }
-  if (!Array.isArray(entries)) throw new Error('change-ai-config.json 顶层不是数组');
-  const settingsText = await readFileText('settings');
-  const zshrcText = await readFileText('zshrc');
-  const active = readActive(settingsText, zshrcText);
-  return {
-    entries,
-    groups: groupConfigs(entries),
-    activeIndex: findActiveIndex(entries, active),
-    configText,
-  };
+  return getConfigState();
 }
 
 export function useConfigState() {
   const [status, setStatus] = useState<LoadStatus>({ kind: 'idle' });
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (): Promise<boolean> => {
     setStatus((prev) => (prev.kind === 'ready' ? prev : { kind: 'loading' }));
     try {
       setStatus({ kind: 'ready', state: await loadConfigState() });
+      return true;
     } catch (err) {
-      if ((err as { kind?: string }).kind === 'json-error') {
-        setStatus({ kind: 'json-error', raw: (err as { raw: string }).raw });
-        return;
-      }
-      const msg = err instanceof Error ? err.message : String(err);
-      setStatus({ kind: 'error', message: msg, needAuth: msg.includes('授权') || msg.includes('Permission') });
+      setStatus({
+        kind: 'error',
+        message: err instanceof ApiError ? err.message : '读取本机配置失败，请重试。',
+        code: err instanceof ApiError ? err.code : 'UNKNOWN_ERROR',
+      });
+      return false;
     }
   }, []);
 
@@ -61,19 +38,11 @@ export function useConfigState() {
     void reload();
   }, [reload]);
 
-  /** 切换模型：按三元组在磁盘最新内容中定位条目，仅写 zshrc，保留 settings.json 原样 */
+  /** 写入失败向调用方抛错；写入成功后返回状态刷新结果，不重放写请求。 */
   const applyModel = useCallback(
-    async (expected: ConfigEntry): Promise<void> => {
-      const { entries } = await loadConfigState();
-      const idx = entries.findIndex(
-        (e) => e.model === expected.model && e.base_url === expected.base_url && e.key === expected.key,
-      );
-      if (idx === -1) {
-        throw new Error(`配置项已不存在或已被外部修改（${expected.model}），请刷新后重选`);
-      }
-      const entry = entries[idx]!;
-      await writeFileAtomic('zshrc', (latest) => insertZshrcBlock(latest, entry));
-      await reload();
+    async (expected: ConfigEntry): Promise<boolean> => {
+      await applyModelConfig(expected);
+      return reload();
     },
     [reload],
   );

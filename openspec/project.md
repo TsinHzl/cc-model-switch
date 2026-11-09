@@ -2,23 +2,27 @@
 
 ## 技术栈
 
-- 本仓库为多项目根目录（无统一技术栈），各子目录独立项目
-- 本次变更技术栈：React 18 + TypeScript（Web UI），静态部署，无后端运行时依赖
-- 浏览器 File System Access API（`window.showOpenFilePicker` / `showSaveFilePicker`），仅 Chrome/Edge 支持
+- 单项目仓库：React 18 + TypeScript + Vite 前端，原生 Node HTTP/文件服务，Zod 边界校验，Vitest 测试。
+- 服务运行在配置所在 Mac，浏览器通过同源 API 操作，不依赖 File System Access API。
 
 ## 架构约定
 
-- 浏览器直写架构：服务端仅托管静态资源（端口 15858），本地文件读写全部由用户 Mac 上的浏览器完成
-- 本地 `~/change-ai-config.json` 为唯一配置数据源，Web UI 不在服务端存任何配置副本
-- 与 `~/change-ai-config.sh` 行为完全对齐：切换模型时互斥写入 `~/.zshrc` 标记块或 `~/.claude/settings.json` env 块，并清理另一处
-- 访问控制：Web UI 密码保护（首次访问设置密码，密码哈希存 localStorage）
+- 生产监听 `127.0.0.1:15858`，托管 dist 和 API；开发由 Vite 在 `127.0.0.1:5173` 挂载同一 API。Host 精确匹配，不开放 CORS 或远程静态部署。
+- 配置来自服务进程用户 home 的固定三个文件；config 可读写，zshrc 可读写，settings 只读，不存服务端配置副本。
+- 模型切换仅写 zshrc，保留七键 export、标记块及转义格式；settings 优先用于激活态识别，不做互斥清理。
+- 只支持普通文件，拒绝符号链接；写前重读、校验三元组/原数组下标，进程内串行原子替换、写后回读，不宣称跨进程 CAS。
+- 密码门禁仅防误触；API 采用 Host/Origin/同源 bootstrap/内存 token 校验。会话失效需整页刷新，写入不确定时核对状态，不自动重放。
 
 ## 目录结构
 
-- `openspec/`：OpenSpec 规范文件（project.md、changes/、specs/）
-- 各业务项目为根目录下独立子目录，互不依赖
+- `src/`：页面、API 客户端和共享领域纯函数。
+- `server/`：固定文件 IO、元数据检测、业务服务、HTTP 边界及真实 IO/HTTP 测试。
+- `server.mjs`：生产服务入口；`vite.domain.config.ts`：共享领域构建入口。
+- `dist/`：前端产物；`dist-server/`：非静态托管的服务端领域产物。
+- `openspec/`：项目上下文、当前 specs 与历史 changes 归档。
 
 ## 开发约定
 
-- 无统一 linter/测试配置；本次变更按子项目自带配置执行
-- 提交信息遵循 `<type>(<change-name>): <description>` 格式
+- 使用 `npm test`（先构建领域模块）和 `npm run build` 验证；无 ESLint/Prettier 配置。
+- 测试只用临时配置与自建服务，不修改真实个人文件或停止既有进程。
+- 常规提交格式沿用 `<type>: <中文描述>`；跳过 OpenSpec 的变更另遵守用户确认的前缀约定。

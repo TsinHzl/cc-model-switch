@@ -784,20 +784,6 @@
   flex-wrap: wrap;
 }
 
-.raw-view {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-dim);
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 12px;
-  overflow: auto;
-  max-height: 240px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 /* ============ 密码门禁（沿用结构，换用新主题） ============ */
 .gate-main {
   flex: 1;

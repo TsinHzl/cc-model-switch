@@ -8,21 +8,22 @@
     "dev": "vite",
     "build:domain": "vite build --config vite.domain.config.ts",
     "build": "tsc -b && npm run build:domain && vite build",
-    "preview": "vite preview",
+    "preview": "node server.mjs",
     "pretest": "npm run build:domain",
     "test": "vitest run",
     "serve": "node server.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "~5.6.3",
-    "vite": "^5.4.11",
-    "vitest": "^2.1.8"
+    "vite": "6.4.5",
+    "vitest": "4.1.12"
   }
 }

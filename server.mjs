@@ -1,12 +1,14 @@
-/* 静态文件服务器：托管 dist/，端口 15858（node server.mjs） */
+/* 本机 API 与静态文件服务器，仅在直接执行时监听。 */
 import { createServer } from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
-import { extname, join, normalize } from 'node:path';
+import { lstat, readFile, realpath, stat } from 'node:fs/promises';
+import { userInfo } from 'node:os';
+import { extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createApiHandler } from './server/api.mjs';
+import { FileStoreError } from './server/errors.mjs';
 
 const PORT = 15858;
-const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), 'dist');
-
+const ROOT = fileURLToPath(new URL('./dist', import.meta.url));
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -17,28 +19,71 @@ const MIME = {
   '.ico': 'image/x-icon',
 };
 
-const server = createServer(async (req, res) => {
-  try {
-    const urlPath = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
-    // 防路径穿越：归一化后必须仍在 dist 内
-    let filePath = normalize(join(ROOT, urlPath));
-    if (!filePath.startsWith(ROOT)) {
-      res.writeHead(403).end('Forbidden');
-      return;
+async function locate(root, pathname) {
+  let current = root;
+  for (const segment of pathname.split('/').filter(Boolean)) {
+    const candidate = join(current, segment);
+    try {
+      await lstat(candidate);
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      throw error;
     }
-    if (urlPath.endsWith('/')) filePath = join(filePath, 'index.html');
-    if (!(await stat(filePath).catch(() => null))?.isFile()) {
-      // SPA 兜底：未知路径回首页（FSA 授权刷新场景）
-      filePath = join(ROOT, 'index.html');
+    try {
+      current = await realpath(candidate);
+    } catch {
+      throw new FileStoreError('UNSAFE_PATH');
     }
-    const body = await readFile(filePath);
-    res.writeHead(200, { 'Content-Type': MIME[extname(filePath)] ?? 'application/octet-stream' });
-    res.end(body);
-  } catch {
-    res.writeHead(500).end('Internal Server Error');
+    const fromRoot = relative(root, current);
+    if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`)) {
+      throw new FileStoreError('UNSAFE_PATH');
+    }
   }
-});
+  return { path: current, stat: await stat(current) };
+}
 
-server.listen(PORT, () => {
-  console.log(`cc-config-webui → http://127.0.0.1:${PORT}（dist/ 静态托管）`);
-});
+async function serveStatic(root, pathname, req, res) {
+  if (!['GET', 'HEAD'].includes(req.method)) {
+    throw new FileStoreError('NOT_FOUND');
+  }
+  let target = await locate(root, pathname);
+  if (target?.stat.isDirectory()) {
+    target = await locate(root, `${pathname}/index.html`);
+  }
+  target ??= await locate(root, '/index.html');
+  if (!target?.stat.isFile()) throw new FileStoreError('NOT_FOUND');
+  const body = await readFile(target.path);
+  res.writeHead(200, {
+    'Content-Type': MIME[extname(target.path)] ?? 'application/octet-stream',
+    'Content-Length': body.length,
+  });
+  res.end(req.method === 'HEAD' ? undefined : body);
+}
+
+export async function createLocalServer({ home = userInfo().homedir, root = ROOT } = {}) {
+  const api = await createApiHandler({ home });
+  const staticRoot = await realpath(root);
+  if (!(await stat(staticRoot)).isDirectory()) throw new FileStoreError('UNSAFE_PATH');
+  return createServer({ headersTimeout: 5000, requestTimeout: 10000 }, (req, res) => {
+    void api(req, res, pathname => serveStatic(staticRoot, pathname, req, res));
+  });
+}
+
+function startupFailed(error) {
+  const code = error instanceof FileStoreError ? error.code
+    : ['EADDRINUSE', 'EACCES', 'ENOENT'].includes(error?.code) ? error.code : 'IO_FAILED';
+  process.stderr.write(`本机服务启动失败：${code}\n`);
+  process.exitCode = 1;
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    const server = await createLocalServer();
+    server.once('error', startupFailed);
+    server.listen(PORT, '127.0.0.1', () => {
+      process.stdout.write(`cc-config-webui → http://127.0.0.1:${PORT}\n`);
+    });
+  } catch (error) {
+    startupFailed(error);
+  }
+}

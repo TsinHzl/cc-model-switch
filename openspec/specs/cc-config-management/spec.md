@@ -1,91 +1,102 @@
 ## Purpose
 
-提供可通过浏览器远程切换本机 Claude Code 模型配置、并管理配置项清单的能力：Web UI 与 `~/change-ai-config.sh` 操作同一批本地文件且格式完全兼容，本地 `~/change-ai-config.json` 为唯一数据源。
+提供在配置所在 Mac 上运行的网页服务：浏览器切换 Claude Code 模型并管理配置列表，由同机 Node 服务读写进程用户的固定文件。配置列表以 `~/change-ai-config.json` 为唯一数据源，格式与现有脚本兼容。
 
 ## Requirements
 
-### Requirement: 浏览器直写本地文件
-The system SHALL 在纯静态部署（无后端运行时）下，通过浏览器 File System Access API 直接读写用户本机的 `~/change-ai-config.json`、`~/.claude/settings.json`、`~/.zshrc`，服务端不存储、不转发任何配置数据；站点部署位置不限，但功能仅在 secure context（HTTPS 或 localhost）下的 Chrome/Edge 中可用。
+### Requirement: 同机服务访问固定文件
 
-#### Scenario: 首次授权
-- **GIVEN** 用户从未在本浏览器授权过目标文件
-- **WHEN** 用户在 secure context 下的 Chrome/Edge 打开站点并点击初始化授权
-- **THEN** 页面依次引导选择 3 个目标文件，句柄持久化到 IndexedDB，后续访问免重选
+系统 SHALL 仅监听 loopback，通过同源 API 访问服务用户 home 中的 config、settings、zshrc；settings 只读，不接受 HTTP 指定任意路径、home、文件全文或 shell 命令。
 
-#### Scenario: 不支持的浏览器
-- **GIVEN** 用户使用 Safari 或 Firefox 打开站点
-- **WHEN** 页面完成能力检测
-- **THEN** 展示不支持说明页与替代指引，不进入任何功能界面
+#### Scenario: 首次使用
+- **GIVEN** 目标 Mac 的三个配置文件已存在，且以普通用户启动服务
+- **WHEN** 用户打开 `http://127.0.0.1:15858` 并通过页面门禁
+- **THEN** 页面从本机 API 加载配置，无需浏览器文件授权或 IndexedDB 句柄
 
-#### Scenario: 非 secure context 访问
-- **GIVEN** 用户通过 `http://<远程IP或域名>:15858` 直接访问（非 localhost 非 HTTPS）
-- **WHEN** 页面完成能力检测
-- **THEN** 展示说明页说明浏览器安全限制，并给出 SSH 端口转发命令等访问指引
+#### Scenario: 非支持访问来源
+- **WHEN** 请求 Host 不等于 `127.0.0.1:实际监听端口`，或写请求 Origin 不同源
+- **THEN** 服务拒绝请求，不开放 CORS，也不信任转发头
 
-#### Scenario: 授权失效
-- **GIVEN** Chrome 重启后文件句柄权限失效
-- **WHEN** 用户触发任一读写操作
-- **THEN** 系统检测到权限失效并引导重新授权，不静默失败
+#### Scenario: 文件不受支持
+- **WHEN** 目标文件缺失，或目标及父路径包含符号链接，或写入涉及不支持的权限/元数据
+- **THEN** 服务安全报错，不自动创建文件、不放宽权限、不跟随链接写入
 
-#### Scenario: 外部并发修改保护
-- **GIVEN** 页面打开期间目标文件被外部工具（sh 脚本、手工编辑）修改
-- **WHEN** 用户在页面执行写入
-- **THEN** 系统先从磁盘重读最新内容再应用增量修改，不基于内存旧副本覆盖外部变更
+### Requirement: 会话与请求校验
 
-### Requirement: 模型切换行为与脚本一致
-The system SHALL 切换模型时的判定与写入行为与 `~/change-ai-config.sh` 完全一致：按 base_url + channel 分组展示配置、激活态三元组匹配、写入位置二选一且互斥清理另一处、zshrc 标记块置顶插入、幂等可重复执行。
+系统 SHALL 使用启动期随机内存 token 保护配置 API；bootstrap 限同源 Fetch Metadata 和自定义头，写请求限 JSON 并校验字段，限制正文大小、读取时间和请求频率。
 
-#### Scenario: 分组展示与激活态
-- **GIVEN** `change-ai-config.json` 含多条配置
-- **WHEN** 页面加载配置列表
-- **THEN** 按 base_url（一级）→ channel（二级）分组渲染，激活项（settings.json env 三元组匹配，env 为空时回退 zshrc 标记块匹配）带高亮标记
+#### Scenario: 服务重启
+- **GIVEN** 页面保留旧 token，服务已重启
+- **WHEN** 用户请求配置 API
+- **THEN** 返回 SESSION_EXPIRED，提示整页刷新，不自动重新鉴权或重放写请求
 
-#### Scenario: 写入 zshrc
-- **GIVEN** 用户选择某配置项并选择写入 macOS 环境变量
-- **WHEN** 确认切换
-- **THEN** 删除 zshrc 中旧标记块（若存在），将含 7 个 ANTHROPIC_* export 的标记块插入文件最前面（值按 bash printf %q 等价规则转义），并删除 settings.json env 块中的同名 7 键
+### Requirement: 模型切换仅写 zshrc
 
-#### Scenario: 写入 settings.json
-- **GIVEN** 用户选择某配置项并选择写入 ~/.claude/settings.json
-- **WHEN** 确认切换
-- **THEN** settings.json env 块中 7 个 ANTHROPIC_* 键原子更新（JSON 其他内容原样保留，2 空格缩进），并删除 zshrc 中标记块
+系统 SHALL 按 base_url → channel 分组，以 model/base_url/key 三元组匹配激活态；切换仅写 zshrc，不修改或清理 settings.json。
 
-#### Scenario: 写入失败保护
-- **GIVEN** 目标文件写入过程中发生错误
-- **WHEN** createWritable 写入或校验失败
-- **THEN** 原文件不被破坏（close 前不落盘），UI 明确报错并支持重试
+#### Scenario: 分组与激活态
+- **GIVEN** 配置列表包含多条记录
+- **WHEN** 页面加载
+- **THEN** 按出现顺序分组并保留原数组下标；优先使用 settings env 三元组，三字段全空或解析失败才回退 zshrc
+
+#### Scenario: 确认切换
+- **WHEN** 用户确认所选配置
+- **THEN** 服务在最新 config 中按三元组重新定位，缺失时报冲突；删除旧 zshrc 标记块并置顶插入包含七个 ANTHROPIC_* export 的新块，按 bash printf %q 等价规则转义
+- **AND** settings.json 保持原样；页面刷新后仍按 settings 优先识别，不强制高亮刚写入的配置
+
+#### Scenario: 取消切换
+- **WHEN** 用户取消确认弹窗
+- **THEN** 不发出写请求，不修改文件
+
+### Requirement: 写入保护与反馈
+
+系统 SHALL 基于最新磁盘文本计算增量，进程内串行写入；无变化不写，使用同目录排他临时文件、fsync、替换前目标及依赖复核、rename 和回读校验。此机制不保证跨进程绝对互斥。
+
+#### Scenario: 替换前失败
+- **WHEN** 写入或检查在 rename 前失败
+- **THEN** 中止替换并清理本次临时文件，页面显示安全错误
+
+#### Scenario: 替换后结果不确定
+- **WHEN** rename 后校验失败，或浏览器无法确认写请求结果
+- **THEN** 提示可能已写入，要求刷新核对，不自动重试写操作
+
+#### Scenario: 写入成功但刷新失败
+- **WHEN** 服务返回 204，随后读取状态失败
+- **THEN** 页面分别说明写入成功及状态刷新失败，不宣称未写入；重试只读取状态
 
 ### Requirement: 配置项管理
-The system SHALL 支持通过 Web UI 对 `change-ai-config.json` 条目进行新增、修改、删除，字段为 base_url / key / model / channel，写回保持 JSON 数组结构与 4 空格缩进（与现有 ~/change-ai-config.json 手工格式一致；消费方 sh 脚本 json.load 对缩进无感知），与手工编辑及 sh 脚本完全兼容。
+
+系统 SHALL 提供 base_url/key/model/channel 四字段新增、编辑、删除，只写 config，保持 JSON 数组、四空格缩进及末尾换行。
 
 #### Scenario: 新增配置项
-- **WHEN** 用户在管理界面填写 4 字段并通过必填校验后提交
-- **THEN** 条目追加到 JSON 数组并写回本地文件，列表即时刷新
+- **WHEN** 用户提交通过校验的配置
+- **THEN** 基于最新数组追加条目，保留其他条目的未知字段，写后刷新列表
 
-#### Scenario: 修改配置项
-- **GIVEN** 已有条目被编辑且通过校验
-- **WHEN** 用户保存
-- **THEN** 仅该条目内容更新，其余条目与 JSON 结构不变
+#### Scenario: 编辑或删除冲突
+- **GIVEN** 外部操作改变了所选条目的原数组下标或三元组
+- **WHEN** 用户保存或确认删除
+- **THEN** 服务拒绝写入并提示重新读取，不覆盖外部变更
+
+#### Scenario: 编辑配置项
+- **WHEN** 下标和三元组校验通过
+- **THEN** 用提交的四个已知字段替换该条目，其余条目保持不变
 
 #### Scenario: 删除配置项
-- **GIVEN** 用户对某条目点击删除并确认
-- **WHEN** 删除执行
-- **THEN** 该条目从数组移除并写回，若被删除的是当前激活项则激活态标记消失（不自动切换）
+- **WHEN** 用户确认删除且校验通过
+- **THEN** 从最新数组移除该条目，不自动切换或清理激活环境；刷新后重新匹配激活项
 
-#### Scenario: JSON 写坏保护
-- **GIVEN** 磁盘上的 change-ai-config.json 被外部手工编辑损坏
-- **WHEN** 页面尝试加载
-- **THEN** 解析失败时展示明确错误与原始内容查看入口，不进行任何写入
+#### Scenario: JSON 损坏
+- **WHEN** 磁盘 config 不是合法配置列表
+- **THEN** 页面显示安全错误，不展示配置原文；依赖该列表的写入被拒绝，修复文件后可重新读取
 
-### Requirement: 访问密码保护
-The system SHALL 以密码门禁控制 UI 访问：首次访问设置密码（哈希存储于浏览器本地），后续访问需验证通过；密码遗忘可通过清除浏览器站点数据重置。
+### Requirement: 页面密码门禁
 
-#### Scenario: 首次设置密码
-- **GIVEN** 浏览器本地无密码记录
-- **WHEN** 用户首次访问
-- **THEN** 引导设置密码（需二次确认输入），验证通过后进入功能界面
+系统 SHALL 保留首次设置密码及后续登录验证；哈希存 localStorage、会话解锁存 sessionStorage，清除站点数据可重置。门禁仅防误触，不作为 API 安全边界，不隔离恶意本机进程或同源代码。
 
-#### Scenario: 登录验证
-- **GIVEN** 已设置密码
-- **WHEN** 用户再次访问输入错误密码
+#### Scenario: 首次设置
+- **WHEN** 浏览器没有密码记录
+- **THEN** 要求两次一致输入并完成设置后才挂载配置页面，不提前请求配置 API
+
+#### Scenario: 密码错误
+- **WHEN** 用户输入错误密码
 - **THEN** 拒绝进入功能界面并提示重试

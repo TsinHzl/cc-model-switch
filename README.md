@@ -1,66 +1,66 @@
 # cc-model-switch
 
-将 `~/change-ai-config.sh` + `~/change-ai-config.json` 的能力搬上 Web：在浏览器里切换 Claude Code 模型、管理配置条目，**通过 File System Access API 直接读写本地文件，服务器不接触任何配置数据**。
+将 `~/change-ai-config.sh` + `~/change-ai-config.json` 的配置管理搬上 Web：浏览器操作界面，同一台 Mac 上的 Node 服务直接读写本地文件，不再使用浏览器文件授权。
 
-React 18 + TypeScript + Vite 纯静态站，零后端逻辑、零运行时依赖（仅 react/react-dom）。
+采用 React 18 + TypeScript + Vite + Zod，后端使用原生 Node HTTP 与文件 API。服务必须运行在存放配置的 Mac 上，修改的是服务进程用户的文件，而非任意访问者的文件。
 
 ## 快速开始
+
+准备 macOS 与 Node.js/npm（已验证 Node.js 25.9.0），并确认当前用户的三个文件已存在：
+
+- `~/change-ai-config.json`：配置列表，可读写。
+- `~/.claude/settings.json`：只读，用于识别当前模型。
+- `~/.zshrc`：模型切换只写此文件的标记块。
+
+使用一键启动前，确认端口 15858 没有其他服务：现有启动脚本会先停止旧进程，停止脚本还会清理占用该端口的进程。
+
+```bash
+./start.sh   # 缺依赖时安装，每次启动前完整构建，然后后台运行
+./stop.sh    # 停止服务；包含按端口清理的兜底逻辑
+```
+
+打开 **http://127.0.0.1:15858**，首次设置访问密码，然后直接操作；无需选择文件或授权 `.zshrc`。
+
+使用前台方式时：
 
 ```bash
 npm install
 npm run build
-node server.mjs          # → http://localhost:15858
+npm run serve
 ```
 
-开发模式：`npm run dev`（Vite 5173 端口，同样满足 secure context）。
+开发模式使用 `npm run dev`，打开 **http://127.0.0.1:5173**；Vite 挂载同一套本机 API。`npm run preview` 与生产服务入口相同，需先构建。
 
-## 三种访问方式（必须满足 secure context）
+## 文件与访问边界
 
-浏览器只有 HTTPS / localhost 才开放文件读写与加密 API，按部署位置三选一：
-
-| 方式 | 命令 | 访问地址 |
-|---|---|---|
-| 本机直跑 | `node server.mjs` | http://localhost:15858 |
-| 远程服务器 + SSH 隧道（推荐） | `ssh -L 15858:127.0.0.1:15858 <user>@<server>` | http://localhost:15858 |
-| 远程服务器 + HTTPS 反代 | Nginx/Caddy 反代 15858 并配证书 | https://你的域名 |
-
-> ⚠️ 用 `http://<服务器IP>:15858` 直接访问**不可用**——非 secure context，浏览器禁止 File System Access API 与 `crypto.subtle`，页面会显示对应说明。
-> 必须从**存放配置文件的 Mac** 上的浏览器访问（浏览器直写架构决定的）。
-
-## 首次使用
-
-1. Chrome / Edge（桌面版，Safari/Firefox 不支持）打开页面
-2. 设置访问密码（SHA-256 哈希存 localStorage，防误触而非安全边界）
-3. 依次授权 3 个文件（文件选择器中按 **Cmd+Shift+.** 显示 `.zshrc` 等隐藏文件）：
-   - `~/change-ai-config.json`
-   - `~/.claude/settings.json`
-   - `~/.zshrc`
-4. 授权持久化在 IndexedDB，刷新无需重选；浏览器重启后首次读写会请求恢复权限，一键确认
+- 服务仅监听 `127.0.0.1`，严格检查 Host 为 `127.0.0.1:实际端口`；请勿改用 `localhost`、远程 IP 或域名访问，也不支持静态托管或直接套用反向代理配置。
+- 文件路径固定来自服务进程用户的 home，不接受浏览器提交路径、文件全文或 shell 命令；不执行或 source 用户配置。
+- 仅支持普通文件，拒绝目标和父路径中的符号链接；缺文件时报错，不自动创建。
+- 写入拒绝硬链接、不支持的权限、所有权及无法可靠保留的 ACL、扩展属性或 flags；不以 root 运行，不通过放宽权限绕过检查。
+- 浏览器不再要求 File System Access API；门禁和剪贴板仍使用现代浏览器 API，本机 loopback 地址提供安全上下文。已验收 Chrome，其他浏览器未做完整验收。
 
 ## 功能
 
-- **模型切换**：按 URL → 渠道 双级分组（与 sh 脚本菜单一致），当前激活项高亮；写入位置二选一（`~/.zshrc` 标记块 / `~/.claude/settings.json` env），另一目标互斥清理——与 `~/change-ai-config.sh` 行为逐字节兼容（bash `printf %q` 转义、jq `--indent 2` 序列化、标记块置顶）
-- **配置管理**：表单新增/编辑/删除条目，必填校验，key 默认脱敏可切明文，写回保持 4 空格缩进原格式
-- **防覆盖**：每次写入前从磁盘重读最新内容再增量修改（页面长开期间外部编辑不会被覆盖），写后回读校验
+- **模型切换**：按 URL → 渠道分组；按 model/base_url/key 三元组识别激活项。只更新 `.zshrc` 置顶标记块中的 7 个 `ANTHROPIC_*` export，保留 bash `printf %q` 等价转义，不修改或清理 settings.json。
+- **激活态**：优先读取 settings.json env，三元组全部为空或解析失败时回退 zshrc。写入 zshrc 后仍可能显示 settings 中的旧模型，这是既定优先级，不强制高亮刚选中的条目。
+- **配置管理**：新增、编辑、删除只写 change-ai-config.json，保持四空格缩进和末尾换行；默认隐藏 key，可切明文、复制、搜索及按分组快捷新增。
+- **冲突保护**：服务写前重读最新内容；切换按三元组定位，编辑/删除校验原数组下标与三元组。写操作进程内串行，并在替换前复核目标及依赖，写后回读。此机制不是跨进程 CAS，不能保证与外部工具绝对互斥。
 
-## 已知局限
+## 错误处理与限制
 
-- 仅 Chrome / Edge 桌面版；需 secure context
-- 切换后**已打开的终端不即时生效**，新开 shell / `claude` 会话生效（与 sh 脚本一致）
-- 密码门禁是防误触，不是安全边界：能物理接触电脑或同源脚本可绕过
-- File System Access API 不回传绝对路径，只能靠文件名校验（选错文件会被拒绝）
+- 遇到配置损坏、缺文件或权限问题，页面显示安全错误，不显示配置原文；修复本地文件后点“重试读取”。
+- 服务重启导致会话失效时，点击“刷新网页”重建会话；客户端不会自动重新鉴权并重放写请求。
+- 提示“可能已写入”或“请求结果无法确认”时，先刷新核对，不直接重复操作。写入成功但状态刷新失败会分别提示，不能把它当作未写入。
+- 已打开的终端不会即时更新环境变量，请在新 shell / Claude 会话中确认配置。
+- 密码门禁仅防误触，哈希保存在 localStorage，会话解锁保存在 sessionStorage；API 使用同源校验和仅驻留内存的启动期 token。它们不隔离恶意本机进程、其他本机账户、浏览器扩展或同源脚本注入。
+- 启动日志为 `.server.log`，pid 记录为 `.server.pid`，两者均已被 Git 忽略。
 
-## 测试
-
-```bash
-npx vitest run   # 33 个用例：shellQuote/applyConfig/configModel（含真实配置分组快照）
-```
-
-## 服务管理
+## 验证
 
 ```bash
-./start.sh   # 一键启动（已在运行则先 stop 再 start；dist 缺失时自动构建）
-./stop.sh    # 一键停止（幂等，未运行时静默通过）
+npm test        # 先构建共享领域模块，再运行全部测试
+npm run build   # 类型检查 + dist-server/domain.mjs + dist/
+npm test -- server/__tests__/api.test.mjs
 ```
 
-启动日志见 `.server.log`，pid 记录在 `.server.pid`（两者均已被 git 忽略风格忽略，可自行加入 .gitignore）。
+测试覆盖共享转换逻辑、临时目录真实文件 IO、真实 HTTP 安全边界和客户端契约；服务测试不使用真实个人配置。浏览器验收使用独立临时配置与浏览器会话，不能以单元测试代替界面及文件写入核对。

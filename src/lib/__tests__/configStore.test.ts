@@ -1,15 +1,10 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createConfigBridge } from '../../../electron/configBridge';
 import type { ConfigEntry } from '../applyConfig';
 import { loadConfigState, useConfigState, type ConfigState } from '../configStore';
-import { ApiError, applyModelConfig, getConfigState } from '../apiClient';
-
-vi.mock('../apiClient', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../apiClient')>(),
-  applyModelConfig: vi.fn(),
-  getConfigState: vi.fn(),
-}));
+import { ApiError } from '../apiClient';
 
 const entry: ConfigEntry = {
   model: 'test-model',
@@ -18,6 +13,9 @@ const entry: ConfigEntry = {
   channel: 'test',
 };
 const previous = { ...entry, model: 'previous-model' };
+const expected = { model: entry.model, base_url: entry.base_url, key: entry.key };
+const invoke = vi.fn<(channel: string, body: unknown) => Promise<unknown>>();
+const fetchMock = vi.fn<typeof fetch>();
 const state: ConfigState = {
   entries: [previous, entry],
   groups: [{
@@ -42,78 +40,92 @@ function getActions() {
 }
 
 beforeEach(() => {
-  vi.resetAllMocks();
-  vi.mocked(getConfigState).mockResolvedValue(state);
-  vi.mocked(applyModelConfig).mockResolvedValue(undefined);
+  invoke.mockReset();
+  fetchMock.mockReset();
+  invoke.mockImplementation(async channel => channel === 'config:state'
+    ? { success: true, data: state } : { success: true });
+  vi.stubGlobal('fetch', fetchMock);
+  vi.stubGlobal('window', {
+    desktop: { platform: 'darwin', config: createConfigBridge(invoke) },
+  });
 });
 
-describe('本机 API 配置状态', () => {
+afterEach(() => {
+  try {
+    expect(fetchMock).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+describe('桌面桥接配置状态', () => {
   it('直接返回服务端分组与激活态，不暴露原始配置文本', async () => {
-    expect(await loadConfigState()).toBe(state);
+    expect(await loadConfigState()).toEqual(state);
     expect(await loadConfigState()).not.toHaveProperty('configText');
-    expect(getConfigState).toHaveBeenCalledTimes(2);
+    expect(invoke.mock.calls).toEqual([['config:state', {}], ['config:state', {}]]);
   });
 
   it('读取失败保留 API 错误，交由状态层处理', async () => {
-    const error = new ApiError('INVALID_CONFIG', '配置列表格式或写入值无效。');
-    vi.mocked(getConfigState).mockRejectedValueOnce(error);
+    invoke.mockResolvedValueOnce({ success: false, code: 'INVALID_CONFIG', cleanupFailed: false });
 
-    await expect(loadConfigState()).rejects.toBe(error);
+    const result = loadConfigState();
+    await expect(result).rejects.toBeInstanceOf(ApiError);
+    await expect(result).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
   });
 
   it('等待写入成功后才刷新，不预先读取或乐观更改激活态', async () => {
-    let finish!: () => void;
-    vi.mocked(applyModelConfig).mockImplementationOnce(() => new Promise<void>(resolve => {
+    let finish!: (value: unknown) => void;
+    invoke.mockImplementationOnce(() => new Promise<unknown>(resolve => {
       finish = resolve;
     }));
 
     const result = getActions().applyModel(entry);
-    expect(applyModelConfig).toHaveBeenCalledExactlyOnceWith(entry);
-    expect(getConfigState).not.toHaveBeenCalled();
-    finish();
+    expect(invoke.mock.calls).toEqual([['config:apply', { expected }]]);
+    finish({ success: true });
 
     await expect(result).resolves.toBe(true);
-    expect(getConfigState).toHaveBeenCalledTimes(1);
+    expect(invoke.mock.calls).toEqual([['config:apply', { expected }], ['config:state', {}]]);
     expect(state.activeIndex).toBe(0);
-    expect(await loadConfigState()).toBe(state);
+    expect(await loadConfigState()).toEqual(state);
   });
 
-  it.each(['CONFLICT', 'WRITE_UNCERTAIN', 'SESSION_EXPIRED'])(
+  it.each(['CONFLICT', 'WRITE_UNCERTAIN', 'RATE_LIMITED', 'IPC_ERROR'])(
     '写入失败 %s 不刷新或重放请求',
     async code => {
-      const error = new ApiError(code, '安全错误提示');
-      vi.mocked(applyModelConfig).mockRejectedValueOnce(error);
+      if (code === 'IPC_ERROR') invoke.mockRejectedValueOnce(new Error('private-marker'));
+      else invoke.mockResolvedValueOnce({ success: false, code, cleanupFailed: false });
 
-      await expect(getActions().applyModel(entry)).rejects.toBe(error);
+      await expect(getActions().applyModel(entry)).rejects.toMatchObject({ name: 'ApiError', code });
 
-      expect(applyModelConfig).toHaveBeenCalledExactlyOnceWith(entry);
-      expect(getConfigState).not.toHaveBeenCalled();
+      expect(invoke.mock.calls).toEqual([['config:apply', { expected }]]);
     },
   );
 
   it('写入成功但刷新失败时返回 false，不伪装成写入失败或重放', async () => {
-    vi.mocked(getConfigState).mockRejectedValueOnce(
-      new ApiError('NETWORK_ERROR', '无法连接本机服务。'),
-    );
+    invoke.mockResolvedValueOnce({ success: true })
+      .mockRejectedValueOnce(new Error('private-marker'));
 
-    await expect(getActions().applyModel(entry)).resolves.toBe(false);
+    const actions = getActions();
+    await expect(actions.applyModel(entry)).resolves.toBe(false);
 
-    expect(applyModelConfig).toHaveBeenCalledExactlyOnceWith(entry);
-    expect(getConfigState).toHaveBeenCalledTimes(1);
+    expect(invoke.mock.calls).toEqual([['config:apply', { expected }], ['config:state', {}]]);
+    await expect(actions.reload()).resolves.toBe(true);
+    expect(invoke.mock.calls).toEqual([
+      ['config:apply', { expected }], ['config:state', {}], ['config:state', {}],
+    ]);
   });
 
   it('显式刷新成功返回 true，不触发写入', async () => {
     await expect(getActions().reload()).resolves.toBe(true);
 
-    expect(getConfigState).toHaveBeenCalledTimes(1);
-    expect(applyModelConfig).not.toHaveBeenCalled();
+    expect(invoke.mock.calls).toEqual([['config:state', {}]]);
   });
 
   it('未知刷新异常收敛为失败结果，不触发写入', async () => {
-    vi.mocked(getConfigState).mockRejectedValueOnce(new Error('private-marker'));
+    invoke.mockRejectedValueOnce(new Error('private-marker'));
 
     await expect(getActions().reload()).resolves.toBe(false);
 
-    expect(applyModelConfig).not.toHaveBeenCalled();
+    expect(invoke.mock.calls).toEqual([['config:state', {}]]);
   });
 });

@@ -15,20 +15,21 @@ const MESSAGES = Object.freeze({
   INVALID_CONFIG: '配置列表格式或写入值无效。',
   INVALID_REQUEST: '请求格式或字段无效。',
   FORBIDDEN: '请求来源未获授权。',
-  SESSION_EXPIRED: '本机服务会话已失效，请刷新网页后重试。',
-  NOT_FOUND: '资源不存在。',
-  UNSUPPORTED_MEDIA: '仅接受 application/json 请求。',
   BODY_TOO_LARGE: '请求正文超过大小限制。',
-  REQUEST_TIMEOUT: '请求正文读取超时。',
   RATE_LIMITED: '请求过于频繁，请稍后重试。',
   TRANSFORM_FAILED: '配置变更计算失败。',
   IO_FAILED: '本地文件操作失败。',
   WRITE_UNCERTAIN: '配置可能已写入，请刷新确认；不要自动重试。',
 });
 
+export type FileErrorCode = keyof typeof MESSAGES;
+
 export class FileStoreError extends Error {
-  constructor(code, cleanupFailed = false) {
-    const known = Object.hasOwn(MESSAGES, code) ? code : 'IO_FAILED';
+  readonly code: FileErrorCode;
+  readonly cleanupFailed: boolean;
+
+  constructor(code: string, cleanupFailed = false) {
+    const known = Object.hasOwn(MESSAGES, code) ? code as FileErrorCode : 'IO_FAILED';
     super(MESSAGES[known] + (cleanupFailed ? ' 文件资源清理失败，需人工检查。' : ''));
     this.name = 'FileStoreError';
     this.code = known;
@@ -36,12 +37,13 @@ export class FileStoreError extends Error {
   }
 }
 
-export function safeFileError(error) {
+export function safeFileError(error: unknown): FileStoreError {
   if (error instanceof FileStoreError) return error;
-  return new FileStoreError(error?.code === 'ENOENT' ? 'FILE_MISSING' : 'IO_FAILED');
+  const code = (error as NodeJS.ErrnoException | null | undefined)?.code;
+  return new FileStoreError(code === 'ENOENT' ? 'FILE_MISSING' : 'IO_FAILED');
 }
 
-export async function safeIO(action) {
+export async function safeIO<T>(action: () => Promise<T>): Promise<T> {
   try {
     return await action();
   } catch (error) {

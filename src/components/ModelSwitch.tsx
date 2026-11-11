@@ -2,58 +2,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConfigState } from '../lib/configStore';
 import { ApiError, addEntry, updateEntry, deleteEntry } from '../lib/apiClient';
-import { buildExportLines, type ConfigEntry } from '../lib/applyConfig';
+import { clipboardErrorMessage, writeClipboardText } from '../lib/clipboardClient';
+import type { ConfigEntry } from '../lib/applyConfig';
+import { copyEnvToClipboard } from '../lib/envClipboard';
 import type { GroupedConfig } from '../lib/configModel';
 import { maskKey } from '../lib/maskKey';
+import { latencyText, measureLatency } from '../lib/measureLatency';
 import { EntryForm, type EditMode, type AddPreset } from './EntryForm';
 import { ConfirmDelete } from './ConfirmDelete';
 import pkg from '../../package.json';
 
-/** 一次性测速：HEAD 优先，失败/不支持回退 GET；AbortController 5s 超时；失败返回 null（显示 —） */
-async function measureLatency(url: string): Promise<number | null> {
-  const withTimeout = (init: RequestInit) => {
-    const ctl = new AbortController();
-    const timer = window.setTimeout(() => ctl.abort(), 5000);
-    return {
-      ...init,
-      signal: ctl.signal,
-      timer,
-      clear: () => window.clearTimeout(timer),
-    } as RequestInit & { timer: number; clear: () => void };
-  };
-  const run = async (init: RequestInit): Promise<number | null> => {
-    const t0 = performance.now();
-    try {
-      await fetch(url, init);
-      return Math.round(performance.now() - t0);
-    } catch {
-      return null;
-    }
-  };
-  const head = withTimeout({ method: 'HEAD', cache: 'no-store' });
-  try {
-    const ms = await run(head);
-    if (ms !== null) return ms;
-  } finally {
-    head.clear?.();
-  }
-  const get = withTimeout({ cache: 'no-store' });
-  try {
-    return await run(get);
-  } finally {
-    get.clear?.();
-  }
-}
-
-/** 测速结果展示文案：快慢分级与设计稿口径一致 */
-function latencyText(ms: number): string {
-  if (ms < 80) return `${ms}ms 响应极快`;
-  if (ms < 300) return `${ms}ms 响应较快`;
-  return `${ms}ms`;
-}
-
 export default function ModelSwitch() {
   const { status, reload, applyModel } = useConfigState();
+  const platform = typeof window === 'undefined' ? undefined : window.desktop?.platform;
+  const envCopyTitle = platform === 'win32'
+    ? '复制 7 行 PowerShell 当前会话赋值文本（不持久化）'
+    : platform === 'darwin' || platform === 'linux'
+      ? '复制 7 行 ANTHROPIC_* export'
+      : '当前平台未知或不受支持，无法复制 Env';
   const [showKeys, setShowKeys] = useState(false);
   const [pending, setPending] = useState<ConfigEntry | null>(null);
   const [busy, setBusy] = useState(false);
@@ -99,30 +65,38 @@ export default function ModelSwitch() {
   /** 复制条目 API Key 到剪贴板，成功/失败均 toast 反馈 */
   const copyKey = async (entry: ConfigEntry) => {
     try {
-      await navigator.clipboard.writeText(entry.key);
+      await writeClipboardText(entry.key);
       showToast('ok', `已复制 ${entry.model} 的 API Key`);
     } catch (err) {
-      showToast('err', `复制失败：${err instanceof Error ? err.message : String(err)}`);
+      showToast('err', clipboardErrorMessage(err));
     }
   };
 
   /** 复制条目完整 JSON（四字段）到剪贴板 */
   const copyEntryJson = async (entry: ConfigEntry) => {
     try {
-      await navigator.clipboard.writeText(JSON.stringify(entry, null, 2));
+      await writeClipboardText(JSON.stringify(entry, null, 2));
       showToast('ok', `已复制 ${entry.model} 的完整配置`);
     } catch (err) {
-      showToast('err', `复制失败：${err instanceof Error ? err.message : String(err)}`);
+      showToast('err', clipboardErrorMessage(err));
     }
   };
 
-  /** 复制激活条目的 7 行 export 环境变量（与 zshrc 标记块内容一致） */
+  /** 按桌面平台复制当前会话环境变量文本，不执行或持久化。 */
   const copyEnv = async (entry: ConfigEntry) => {
     try {
-      await navigator.clipboard.writeText(`${buildExportLines(entry).join('\n')}\n`);
-      showToast('ok', '已复制 7 行 ANTHROPIC_* export');
+      const result = await copyEnvToClipboard(entry, platform);
+      if (!result.ok) {
+        showToast('err', result.code === 'UNSUPPORTED_PLATFORM'
+          ? '无法识别或不支持当前平台，未提交 Env 复制请求。'
+          : '配置包含 Windows Env 文本不支持的字符，未提交复制请求。');
+        return;
+      }
+      showToast('ok', result.format === 'powershell'
+        ? '已复制 7 行 PowerShell 环境变量赋值文本；执行后仅作用于当前会话，不持久化。'
+        : '已复制 7 行 ANTHROPIC_* export');
     } catch (err) {
-      showToast('err', `复制失败：${err instanceof Error ? err.message : String(err)}`);
+      showToast('err', clipboardErrorMessage(err));
     }
   };
 
@@ -159,8 +133,15 @@ export default function ModelSwitch() {
           </div>
           <div className="subtitle">
             <span>
-              与 <code>~/change-ai-config.sh</code> 共用配置：模型切换仅写入 zshrc 标记块，不修改 settings.json
+              配置列表：<code>~/change-ai-config.json</code>；当前仅支持 macOS 写入，
+              切换只更新 <code>~/.zshrc</code> 标记块，不修改 settings.json
             </span>
+            {platform === 'win32' && (
+              <span>
+                复制 Env 仅生成 PowerShell 5.1 / 7.x 赋值文本，不会自动执行；执行后仅影响当前会话，不写入持久配置。
+                空值在 5.1、7.0–7.4 中删除对应环境变量，7.5 起保留为空字符串。
+              </span>
+            )}
             {status.kind === 'ready' && (
               <span className="stats-badge">
                 共 {status.state.entries.length} 条 · {status.state.groups.length} 个 URL 分组
@@ -195,19 +176,20 @@ export default function ModelSwitch() {
       </header>
 
       {status.kind === 'loading' && <p className="hint">读取中…</p>}
-      {status.kind === 'error' && <ErrorPane message={status.message} code={status.code} onRetry={reload} />}
+      {status.kind === 'error' && <ErrorPane message={status.message} onRetry={reload} />}
       {status.kind === 'ready' && (
         <>
           {status.state.activeIndex >= 0 ? (
             <ActiveHero
               entry={status.state.entries[status.state.activeIndex]!}
               showKeys={showKeys}
+              envCopyTitle={envCopyTitle}
               onCopyEnv={(entry) => void copyEnv(entry)}
             />
           ) : (
             <div className="pane">
-              <h2>当前无激活配置</h2>
-              <p>settings.json env 与 zshrc 标记块均为空；在下方列表选择一个模型开始切换。</p>
+              <h2>未匹配到激活配置</h2>
+              <p>当前激活信息未匹配到列表条目；settings.json 中的配置优先用于识别激活状态。</p>
             </div>
           )}
           <FilterBar
@@ -286,10 +268,12 @@ export default function ModelSwitch() {
 function ActiveHero({
   entry,
   showKeys,
+  envCopyTitle,
   onCopyEnv,
 }: {
   entry: ConfigEntry;
   showKeys: boolean;
+  envCopyTitle: string;
   onCopyEnv: (entry: ConfigEntry) => void;
 }) {
   const [latency, setLatency] = useState<number | null | undefined>(undefined);
@@ -322,13 +306,13 @@ function ActiveHero({
         </div>
       </div>
       <div className="active-hero-right">
-        <div className="latency-pill" title="对网关发起一次 HEAD/GET 请求测得">
+        <div className="latency-pill" title="仅测 HTTP(S) 响应时延，不代表模型 API 可用；不跟随重定向，网络或浏览器安全限制可能导致测速失败">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
           </svg>
-          {latency === undefined ? '测速中…' : latency === null ? '—' : latencyText(latency)}
+          {latencyText(latency)}
         </div>
-        <button className="btn btn-sm" title="复制 7 行 ANTHROPIC_* export" onClick={() => onCopyEnv(entry)}>
+        <button className="btn btn-sm" title={envCopyTitle} onClick={() => onCopyEnv(entry)}>
           复制 Env
         </button>
       </div>
@@ -602,7 +586,7 @@ function ConfirmDialog({
           <dt>写入位置</dt>
           <dd><code>~/.zshrc</code> 标记块</dd>
         </dl>
-        <p className="hint">仅更新 ~/.zshrc 标记块，不修改 settings.json；页面仍优先读取 settings.json。</p>
+        <p className="hint">仅更新 ~/.zshrc 标记块，不修改 settings.json；写入成功后，激活高亮仍可能由 settings.json 决定。</p>
         <p className="hint">已打开的终端不会即时生效，请在新开的 shell / Claude 会话中确认配置。</p>
         <div className="modal-actions">
           <button className="btn" onClick={onCancel} disabled={busy}>
@@ -619,26 +603,19 @@ function ConfirmDialog({
 
 function ErrorPane({
   message,
-  code,
   onRetry,
 }: {
   message: string;
-  code: string;
   onRetry: () => Promise<boolean>;
 }) {
-  const sessionExpired = code === 'SESSION_EXPIRED';
-
   return (
     <div className="pane pane-error">
-      <h2>{sessionExpired ? '本机服务会话已失效' : '无法读取本机配置'}</h2>
+      <h2>无法读取本机配置</h2>
       <p>{message}</p>
-      <p className="hint">文件由本机 Node 服务直接读取，无需浏览器文件授权。请检查服务与本地配置后重试。</p>
+      <p className="hint">请检查桌面应用与本地配置后重新读取；若此前执行过写入，请先核对结果，不要直接重复写入。</p>
       <div className="pane-actions">
-        <button className="btn btn-primary" onClick={() => {
-          if (sessionExpired) window.location.reload();
-          else void onRetry();
-        }}>
-          {sessionExpired ? '刷新网页' : '重试读取'}
+        <button className="btn btn-primary" onClick={() => void onRetry()}>
+          重新读取
         </button>
       </div>
     </div>

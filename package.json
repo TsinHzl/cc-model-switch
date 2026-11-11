@@ -2,28 +2,57 @@
   "name": "cc-model-switch",
   "private": true,
   "version": "1.0.0",
+  "author": "Harllan",
   "type": "module",
+  "main": "out/main/index.js",
   "scripts": {
-    "predev": "npm run build:domain",
-    "dev": "vite",
-    "build:domain": "vite build --config vite.domain.config.ts",
-    "build": "tsc -b && npm run build:domain && vite build",
-    "preview": "node server.mjs",
-    "pretest": "npm run build:domain",
-    "test": "vitest run",
-    "serve": "node server.mjs"
+    "desktop:install": "node node_modules/electron/install.js",
+    "desktop:dev": "electron-vite dev",
+    "desktop:typecheck": "tsc --noEmit -p tsconfig.electron.json",
+    "desktop:build": "npm run desktop:typecheck && tsc -b && electron-vite build",
+    "desktop:test:build": "npm run desktop:typecheck && tsc -b && electron-vite build --config electron.test.vite.config.ts",
+    "desktop:preview": "electron-vite preview",
+    "dev": "npm run desktop:dev",
+    "build": "npm run desktop:build",
+    "preview": "npm run desktop:preview",
+    "test": "vitest run"
   },
   "dependencies": {
+    "koffi": "3.3.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@types/node": "24.19.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0",
+    "electron-vite": "6.0.0",
     "typescript": "~5.6.3",
     "vite": "6.4.5",
     "vitest": "4.1.12"
+  },
+  "build": {
+    "appId": "com.harlan.cc-model-switch",
+    "productName": "cc-model-switch",
+    "files": [
+      "out/**/*"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/koffi/**/*",
+      "node_modules/@koromix/**/*"
+    ],
+    "mac": {
+      "target": ["dir"],
+      "category": "public.app-category.developer-tools",
+      "identity": null
+    },
+    "directories": {
+      "output": "release"
+    }
   }
 }

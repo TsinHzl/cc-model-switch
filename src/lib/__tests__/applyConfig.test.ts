@@ -3,6 +3,7 @@ import {
   MARKER_BEGIN,
   MARKER_END,
   ANTHROPIC_KEYS,
+  buildEnvironmentEntries,
   buildExportLines,
   removeZshrcBlock,
   insertZshrcBlock,
@@ -17,6 +18,42 @@ const entry: ConfigEntry = {
   model: 'claude-opus-5',
   channel: 'kiro反代cc专属',
 };
+
+describe('共享环境变量映射', () => {
+  it('固定七键顺序及原始值，不包含 channel，不修改输入', () => {
+    const source = Object.freeze({
+      model: '模型 😀', base_url: 'https://fixture.invalid', key: "key'\n",
+      channel: 'not-an-env-value',
+    });
+    expect(buildEnvironmentEntries(source)).toEqual([
+      ['ANTHROPIC_MODEL', '模型 😀'],
+      ['ANTHROPIC_BASE_URL', 'https://fixture.invalid'],
+      ['ANTHROPIC_AUTH_TOKEN', "key'\n"],
+      ['ANTHROPIC_SMALL_FAST_MODEL', '模型 😀'],
+      ['ANTHROPIC_DEFAULT_OPUS_MODEL', '模型 😀'],
+      ['ANTHROPIC_DEFAULT_SONNET_MODEL', '模型 😀'],
+      ['ANTHROPIC_DEFAULT_HAIKU_MODEL', '模型 😀'],
+    ]);
+    expect(source).toEqual({
+      model: '模型 😀', base_url: 'https://fixture.invalid', key: "key'\n",
+      channel: 'not-an-env-value',
+    });
+  });
+
+  it('保留特殊字符、空值和历史多行值的 export 输出', () => {
+    const source = { model: "m ' $()", base_url: '', key: 'a\nb', channel: '' };
+    const model = String.raw`m\ \'\ \$\(\)`;
+    expect(buildExportLines(source)).toEqual([
+      `export ANTHROPIC_MODEL=${model}`,
+      "export ANTHROPIC_BASE_URL=''",
+      'export ANTHROPIC_AUTH_TOKEN=a\\\nb',
+      `export ANTHROPIC_SMALL_FAST_MODEL=${model}`,
+      `export ANTHROPIC_DEFAULT_OPUS_MODEL=${model}`,
+      `export ANTHROPIC_DEFAULT_SONNET_MODEL=${model}`,
+      `export ANTHROPIC_DEFAULT_HAIKU_MODEL=${model}`,
+    ]);
+  });
+});
 
 describe('zshrc 标记块', () => {
   it('7 个键与 sh 脚本一致', () => {

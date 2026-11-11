@@ -1,41 +1,37 @@
-import { z } from 'zod';
+import type { z } from 'zod';
 import type { ConfigEntry } from './applyConfig';
+import type { ConfigState } from './configContract';
+import {
+  configIpcResponseSchemas, type ConfigBridge, type ConfigIpcErrorCode, type ConfigIpcResponse,
+} from './configIpcContract';
 
-const entrySchema = z.object({
-  model: z.string(),
-  base_url: z.string(),
-  key: z.string(),
-  channel: z.string(),
-});
-const stateSchema = z.object({
-  entries: z.array(entrySchema),
-  groups: z.array(z.object({
-    url: z.string(),
-    channels: z.array(z.object({
-      channel: z.string(),
-      items: z.array(z.object({
-        entry: entrySchema,
-        index: z.number().int().nonnegative().safe(),
-      })),
-    })),
-  })),
-  activeIndex: z.number().int().min(-1).safe(),
-}).refine(state =>
-  state.activeIndex < state.entries.length
-  && state.groups.every(group => group.channels.every(channel =>
-    channel.items.every(item => item.index < state.entries.length))));
-const stateResponse = z.object({ success: z.literal(true), data: stateSchema });
-const bootstrapResponse = z.object({
-  success: z.literal(true),
-  data: z.object({ token: z.string().regex(/^[a-f0-9]{64}$/) }),
-});
-const errorResponse = z.object({
-  success: z.literal(false),
-  code: z.string().min(1),
-  error: z.string().min(1),
-});
+const messages = Object.freeze({
+  ROOT_FORBIDDEN: '禁止以 root 身份运行。',
+  INVALID_HOME: '本机用户目录参数无效。',
+  UNKNOWN_KEY: '不支持该配置文件。',
+  READ_ONLY: '该配置文件只允许读取。',
+  UNSUPPORTED_PLATFORM: '当前平台不支持此配置操作。',
+  UNSAFE_PATH: '文件或父目录类型不受支持，不能使用符号链接。',
+  UNSUPPORTED_FILE: '文件链接数、权限或所有权不支持安全替换。',
+  METADATA_UNSUPPORTED: '文件包含无法可靠保留的特殊元数据。',
+  METADATA_CHECK_FAILED: '无法确认文件元数据，已拒绝写入。',
+  FILE_MISSING: '必需的配置文件不存在。',
+  TOO_LARGE: '配置文件超过大小限制。',
+  INVALID_UTF8: '配置文件必须使用无损 UTF-8 文本。',
+  CONFLICT: '配置文件已被其他操作修改，请重新读取。',
+  INVALID_CONFIG: '配置列表格式或写入值无效。',
+  INVALID_REQUEST: '请求格式或字段无效。',
+  FORBIDDEN: '请求来源未获授权。',
+  BODY_TOO_LARGE: '请求正文超过大小限制。',
+  RATE_LIMITED: '当前有配置操作正在进行，请稍后重试。',
+  TRANSFORM_FAILED: '配置变更计算失败。',
+  IO_FAILED: '本地文件操作失败。',
+  WRITE_UNCERTAIN: '配置可能已写入，请重新读取核对；不要直接重复写入。',
+} satisfies Record<ConfigIpcErrorCode, string>);
 
-export type ApiConfigState = z.infer<typeof stateSchema>;
+type Failure = Extract<ConfigIpcResponse<'state'>, { success: false }>;
+
+export type ApiConfigState = ConfigState;
 
 export class ApiError extends Error {
   constructor(readonly code: string, message: string) {
@@ -44,91 +40,46 @@ export class ApiError extends Error {
   }
 }
 
-function invalidResponse() {
-  return new ApiError('INVALID_RESPONSE', '本机服务响应无效，请刷新网页确认状态。');
-}
-
-function validate<T>(schema: z.ZodType<T>, value: unknown): T {
-  const result = schema.safeParse(value);
-  if (!result.success) throw invalidResponse();
-  return result.data;
-}
-
-async function readJSON(response: Response): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch {
-    throw invalidResponse();
+async function request<T extends { success: true }>(
+  action: (bridge: ConfigBridge) => Promise<unknown>,
+  schema: z.ZodType<T | Failure>,
+): Promise<T> {
+  const bridge = typeof window === 'undefined' ? undefined : window.desktop?.config;
+  if (!bridge) {
+    throw new ApiError('DESKTOP_UNAVAILABLE', '桌面配置桥接不可用，请使用桌面应用打开。');
   }
-}
-
-async function request(path: string, init: RequestInit = {}): Promise<Response> {
-  let response: Response;
+  let response: T | Failure;
   try {
-    response = await fetch(path, {
-      ...init,
-      mode: 'same-origin',
-      credentials: 'same-origin',
-      redirect: 'error',
-      cache: 'no-store',
-    });
+    response = schema.parse(await action(bridge));
   } catch {
-    const writing = init.method !== undefined && init.method !== 'GET';
-    throw new ApiError(writing ? 'WRITE_UNCERTAIN' : 'NETWORK_ERROR', writing
-      ? '请求结果无法确认，请刷新状态后检查；不要直接重复写入。'
-      : '无法连接本机服务，请确认服务已启动。');
+    throw new ApiError('IPC_ERROR', '配置通信失败，操作结果未知；请重新读取核对，勿自动重试。');
   }
-  if (!response.ok) {
-    const error = validate(errorResponse, await readJSON(response));
-    throw new ApiError(error.code, error.error);
+  if (!response.success) {
+    throw new ApiError(response.code, messages[response.code]
+      + (response.cleanupFailed ? ' 文件资源清理失败，需人工检查。' : ''));
   }
   return response;
 }
 
-let session: Promise<string> | undefined;
-
-function getToken(): Promise<string> {
-  session ??= request('/api/bootstrap', {
-    headers: { 'x-ccms-bootstrap': '1' },
-  }).then(async response =>
-    validate(bootstrapResponse, await readJSON(response)).data.token,
-  ).catch(error => {
-    session = undefined;
-    throw error;
-  });
-  return session;
-}
-
 export async function getConfigState(): Promise<ApiConfigState> {
-  const response = await request('/api/state', {
-    headers: { 'x-ccms-token': await getToken() },
-  });
-  return validate(stateResponse, await readJSON(response)).data;
+  return (await request(bridge => bridge.state({}), configIpcResponseSchemas.state)).data;
 }
 
-async function write(path: string, method: string, body: unknown): Promise<void> {
-  const response = await request(path, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      'x-ccms-token': await getToken(),
-    },
-    body: JSON.stringify(body),
-  });
-  if (response.status !== 204) throw invalidResponse();
+async function write(action: (bridge: ConfigBridge) => Promise<unknown>): Promise<void> {
+  await request(action, configIpcResponseSchemas.apply);
 }
 
 const identity = ({ model, base_url, key }: ConfigEntry) => ({ model, base_url, key });
 const entryData = (entry: ConfigEntry) => ({ ...identity(entry), channel: entry.channel });
 
 export const applyModelConfig = (entry: ConfigEntry) =>
-  write('/api/apply', 'POST', { expected: identity(entry) });
+  write(bridge => bridge.apply({ expected: identity(entry) }));
 
 export const addEntry = (entry: ConfigEntry) =>
-  write('/api/entries', 'POST', { entry: entryData(entry) });
+  write(bridge => bridge.add({ entry: entryData(entry) }));
 
 export const updateEntry = (index: number, expected: ConfigEntry, entry: ConfigEntry) =>
-  write(`/api/entries/${index}`, 'PATCH', { expected: identity(expected), entry: entryData(entry) });
+  write(bridge => bridge.edit({ index, expected: identity(expected), entry: entryData(entry) }));
 
 export const deleteEntry = (index: number, expected: ConfigEntry) =>
-  write(`/api/entries/${index}`, 'DELETE', { expected: identity(expected) });
+  write(bridge => bridge.remove({ index, expected: identity(expected) }));

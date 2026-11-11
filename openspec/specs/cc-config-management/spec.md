@@ -1,38 +1,47 @@
 ## Purpose
 
-提供在配置所在 Mac 上运行的网页服务：浏览器切换 Claude Code 模型并管理配置列表，由同机 Node 服务读写进程用户的固定文件。配置列表以 `~/change-ai-config.json` 为唯一数据源，格式与现有脚本兼容。
+提供 Electron 桌面模型切换与配置管理，页面经受限 preload/IPC 调用主进程读写账户 home 的固定文件。配置列表以 `~/change-ai-config.json` 为唯一数据源，格式与现有脚本兼容。
+
+当前规范记录已接入的桌面行为，不代表原生验收完成。当前仅 macOS 文件写入可用；Linux 写入保持关闭，Windows 持久化尚未实现，跨平台目标与阻塞见活动变更提案。
 
 ## Requirements
 
-### Requirement: 同机服务访问固定文件
+### Requirement: 桌面桥接访问固定文件
 
-系统 SHALL 仅监听 loopback，通过同源 API 访问服务用户 home 中的 config、settings、zshrc；settings 只读，不接受 HTTP 指定任意路径、home、文件全文或 shell 命令。
+系统 SHALL 通过固定桌面 IPC 访问账户 home 中的 config、settings、zshrc；settings 只读，不接受 renderer 指定任意路径、home、文件全文或 shell 命令，不保留独立配置 HTTP 服务。
 
 #### Scenario: 首次使用
-- **GIVEN** 目标 Mac 的三个配置文件已存在，且以普通用户启动服务
-- **WHEN** 用户打开 `http://127.0.0.1:15858` 并通过页面门禁
-- **THEN** 页面从本机 API 加载配置，无需浏览器文件授权或 IndexedDB 句柄
+- **GIVEN** 目标 Mac 的三个配置文件已存在，且以普通用户启动桌面应用
+- **WHEN** 应用界面加载
+- **THEN** 页面通过桌面桥接加载配置，无需浏览器文件授权或 IndexedDB 句柄
 
 #### Scenario: 非支持访问来源
-- **WHEN** 请求 Host 不等于 `127.0.0.1:实际监听端口`，或写请求 Origin 不同源
-- **THEN** 服务拒绝请求，不开放 CORS，也不信任转发头
+- **WHEN** 配置调用不来自当前可信窗口的存活主 frame，或实际 origin/页面地址不匹配
+- **THEN** 主进程拒绝请求，不调用业务或写文件
+
+#### Scenario: 缺少桌面桥接
+- **WHEN** 页面没有可用的 desktop.config
+- **THEN** 明确提示使用桌面应用，不回退 HTTP
 
 #### Scenario: 文件不受支持
 - **WHEN** 目标文件缺失，或目标及父路径包含符号链接，或写入涉及不支持的权限/元数据
 - **THEN** 服务安全报错，不自动创建文件、不放宽权限、不跟随链接写入
 
-### Requirement: 会话与请求校验
+### Requirement: 固定 IPC 与请求校验
 
-系统 SHALL 使用启动期随机内存 token 保护配置 API；bootstrap 限同源 Fetch Metadata 和自定义头，写请求限 JSON 并校验字段，限制正文大小、读取时间和请求频率。
+系统 SHALL 仅暴露 state/apply/add/edit/remove 五个固定配置方法，校验严格结构和业务字段，限制请求为 64 KiB 紧凑 JSON 等价 UTF-8 字节；五方法共享一个在途名额，忙时拒绝、不排队。预算不覆盖进入 handler 前的克隆开销，单名额不是频率限流。
 
-#### Scenario: 服务重启
-- **GIVEN** 页面保留旧 token，服务已重启
-- **WHEN** 用户请求配置 API
-- **THEN** 返回 SESSION_EXPIRED，提示整页刷新，不自动重新鉴权或重放写请求
+#### Scenario: 请求被拒绝
+- **WHEN** 请求包含额外字段、非法索引、非法写入值或超过载荷预算
+- **THEN** 返回有限错误码，不调用业务或修改配置，不返回原始请求内容
+
+#### Scenario: 通信失败
+- **WHEN** 桥接调用异常或响应不符合共享契约
+- **THEN** 提示操作结果未知，要求重新读取核对，不自动重放写请求
 
 ### Requirement: 模型切换仅写 zshrc
 
-系统 SHALL 按 base_url → channel 分组，以 model/base_url/key 三元组匹配激活态；切换仅写 zshrc，不修改或清理 settings.json。
+系统 SHALL 按 base_url → channel 分组，以 model/base_url/key 三元组匹配激活态；当前 macOS 切换仅写 zshrc，不修改或清理 settings.json。其他平台不得绕过当前写入守卫。
 
 #### Scenario: 分组与激活态
 - **GIVEN** 配置列表包含多条记录
@@ -57,11 +66,11 @@
 - **THEN** 中止替换并清理本次临时文件，页面显示安全错误
 
 #### Scenario: 替换后结果不确定
-- **WHEN** rename 后校验失败，或浏览器无法确认写请求结果
+- **WHEN** rename 后校验失败，或页面无法确认 IPC 写请求结果
 - **THEN** 提示可能已写入，要求刷新核对，不自动重试写操作
 
 #### Scenario: 写入成功但刷新失败
-- **WHEN** 服务返回 204，随后读取状态失败
+- **WHEN** 主进程返回 `{ success: true }`，随后读取状态失败
 - **THEN** 页面分别说明写入成功及状态刷新失败，不宣称未写入；重试只读取状态
 
 ### Requirement: 配置项管理
@@ -89,14 +98,14 @@
 - **WHEN** 磁盘 config 不是合法配置列表
 - **THEN** 页面显示安全错误，不展示配置原文；依赖该列表的写入被拒绝，修复文件后可重新读取
 
-### Requirement: 页面密码门禁
+### Requirement: 页面直接进入配置管理
 
-系统 SHALL 保留首次设置密码及后续登录验证；哈希存 localStorage、会话解锁存 sessionStorage，清除站点数据可重置。门禁仅防误触，不作为 API 安全边界，不隔离恶意本机进程或同源代码。
+系统 SHALL NOT 提供密码设置、登录验证或会话解锁门禁；页面启动即挂载配置管理界面。访问控制由操作系统账户与文件权限负责，UI 不宣称隔离恶意本机进程或已控制的 renderer。
 
-#### Scenario: 首次设置
-- **WHEN** 浏览器没有密码记录
-- **THEN** 要求两次一致输入并完成设置后才挂载配置页面，不提前请求配置 API
+#### Scenario: 直接使用
+- **WHEN** 应用启动且桌面桥接可用
+- **THEN** 直接显示配置列表，不出现密码输入框或解锁步骤，不写入任何门禁凭据到应用存储
 
-#### Scenario: 密码错误
-- **WHEN** 用户输入错误密码
-- **THEN** 拒绝进入功能界面并提示重试
+#### Scenario: 遗留门禁存储
+- **WHEN** 应用存储中存在旧版门禁哈希或会话解锁键
+- **THEN** 不再读取或校验这些键，也不因此阻止进入配置界面

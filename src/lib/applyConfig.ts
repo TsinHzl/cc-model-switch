@@ -22,16 +22,19 @@ export interface ConfigEntry {
   channel: string;
 }
 
+/** 固定七键及原始值；不包含 shell 转义或平台持久化行为。 */
+export function buildEnvironmentEntries(
+  entry: ConfigEntry,
+): ReadonlyArray<readonly [(typeof ANTHROPIC_KEYS)[number], string]> {
+  return ANTHROPIC_KEYS.map(key => [
+    key,
+    key === 'ANTHROPIC_BASE_URL' ? entry.base_url
+      : key === 'ANTHROPIC_AUTH_TOKEN' ? entry.key : entry.model,
+  ] as const);
+}
+
 export function buildExportLines(entry: ConfigEntry): string[] {
-  return [
-    `export ANTHROPIC_MODEL=${shellQuote(entry.model)}`,
-    `export ANTHROPIC_BASE_URL=${shellQuote(entry.base_url)}`,
-    `export ANTHROPIC_AUTH_TOKEN=${shellQuote(entry.key)}`,
-    `export ANTHROPIC_SMALL_FAST_MODEL=${shellQuote(entry.model)}`,
-    `export ANTHROPIC_DEFAULT_OPUS_MODEL=${shellQuote(entry.model)}`,
-    `export ANTHROPIC_DEFAULT_SONNET_MODEL=${shellQuote(entry.model)}`,
-    `export ANTHROPIC_DEFAULT_HAIKU_MODEL=${shellQuote(entry.model)}`,
-  ];
+  return buildEnvironmentEntries(entry).map(([key, value]) => `export ${key}=${shellQuote(value)}`);
 }
 
 /** 删除 zshrc 中已存在的标记块（幂等，对应 sh 脚本 remove_zshrc_block） */
@@ -62,14 +65,13 @@ export function applyToSettingsJson(settingsText: string, entry: ConfigEntry): s
     parsed.env && typeof parsed.env === 'object' && !Array.isArray(parsed.env)
       ? (parsed.env as Record<string, unknown>)
       : {};
-  const targetValue = (k: (typeof ANTHROPIC_KEYS)[number]): string =>
-    k === 'ANTHROPIC_BASE_URL' ? entry.base_url : k === 'ANTHROPIC_AUTH_TOKEN' ? entry.key : entry.model;
-  if (ANTHROPIC_KEYS.every((k) => sourceEnv[k] === targetValue(k))) {
+  const entries = buildEnvironmentEntries(entry);
+  if (entries.every(([key, value]) => sourceEnv[key] === value)) {
     return settingsText;
   }
   const env: Record<string, unknown> = { ...sourceEnv };
-  for (const k of ANTHROPIC_KEYS) {
-    env[k] = targetValue(k);
+  for (const [key, value] of entries) {
+    env[key] = value;
   }
   const next = { ...parsed, env };
   // jq --indent 2 输出格式：2 空格缩进 + 末尾换行

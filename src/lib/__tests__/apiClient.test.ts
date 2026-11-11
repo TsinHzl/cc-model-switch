@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createConfigBridge } from '../../../electron/configBridge';
+import { configIpcErrorCodeSchema } from '../configIpcContract';
+import * as client from '../apiClient';
 
-const token = 'a'.repeat(64);
 const entry = {
   model: 'fixture-model', base_url: 'https://example.invalid',
   key: 'fixture-key', channel: 'fixture-channel',
@@ -14,67 +16,55 @@ const state = {
   }],
   activeIndex: 0,
 };
-const json = (value: unknown, status = 200) =>
-  new Response(JSON.stringify(value), {
-    status, headers: { 'content-type': 'application/json' },
-  });
+const invoke = vi.fn<(channel: string, body: unknown) => Promise<unknown>>();
 const fetchMock = vi.fn<typeof fetch>();
-let client: typeof import('../apiClient');
 
-beforeEach(async () => {
-  vi.resetModules();
+beforeEach(() => {
+  invoke.mockReset();
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
-  client = await import('../apiClient');
+  vi.stubGlobal('window', {
+    desktop: { platform: 'darwin', config: createConfigBridge(invoke) },
+  });
 });
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  try {
+    expect(fetchMock).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
-function bootstrap() {
-  fetchMock.mockResolvedValueOnce(json({ success: true, data: { token } }));
-}
-
-describe('同源 API 客户端', () => {
-  it('校验状态响应并使用仅内存会话与同源请求选项', async () => {
-    bootstrap();
-    fetchMock.mockResolvedValueOnce(json({ success: true, data: state }));
+describe('桌面配置客户端', () => {
+  it('通过固定桥接读取并解析状态，不暴露额外字段', async () => {
+    invoke.mockResolvedValueOnce({
+      success: true,
+      data: { ...state, secret: 'private-marker', entries: [{ ...entry, secret: 'private-marker' }] },
+    });
 
     expect(await client.getConfigState()).toEqual(state);
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/bootstrap', {
-      headers: { 'x-ccms-bootstrap': '1' },
-      mode: 'same-origin', credentials: 'same-origin',
-      redirect: 'error', cache: 'no-store',
-    });
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/state', {
-      headers: { 'x-ccms-token': token },
-      mode: 'same-origin', credentials: 'same-origin',
-      redirect: 'error', cache: 'no-store',
-    });
+    expect(invoke.mock.calls).toEqual([['config:state', {}]]);
   });
 
-  it('并发读取共用一次 bootstrap', async () => {
-    bootstrap();
-    fetchMock.mockResolvedValueOnce(json({ success: true, data: state }));
-    fetchMock.mockResolvedValueOnce(json({ success: true, data: state }));
+  it('显式读取每次调用桥接，不新增鉴权或缓存', async () => {
+    invoke.mockResolvedValue({ success: true, data: state });
 
     expect(await Promise.all([
       client.getConfigState(), client.getConfigState(),
     ])).toEqual([state, state]);
-    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
-      '/api/bootstrap', '/api/state', '/api/state',
+    expect(invoke.mock.calls).toEqual([
+      ['config:state', {}], ['config:state', {}],
     ]);
   });
 
   it.each([
-    ['apply', '/api/apply', 'POST', { expected }],
-    ['add', '/api/entries', 'POST', { entry }],
-    ['update', '/api/entries/2', 'PATCH', { expected, entry }],
-    ['delete', '/api/entries/2', 'DELETE', { expected }],
-  ] as const)('按业务协议发送 %s，204 不解析 JSON', async (operation, path, method, body) => {
-    bootstrap();
-    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    ['apply', 'config:apply', { expected }],
+    ['add', 'config:add', { entry }],
+    ['update', 'config:edit', { index: 2, expected, entry }],
+    ['delete', 'config:remove', { index: 2, expected }],
+  ] as const)('按固定通道发送 %s，写成功不读取状态', async (operation, channel, body) => {
+    invoke.mockResolvedValueOnce({ success: true });
     const supplied = { ...entry, extra: '不得发送' };
     const actions = {
       apply: () => client.applyModelConfig(supplied),
@@ -84,78 +74,73 @@ describe('同源 API 客户端', () => {
     };
 
     await expect(actions[operation]()).resolves.toBeUndefined();
-    expect(fetchMock).toHaveBeenNthCalledWith(2, path, {
-      method,
-      headers: { 'content-type': 'application/json', 'x-ccms-token': token },
-      body: JSON.stringify(body),
-      mode: 'same-origin', credentials: 'same-origin',
-      redirect: 'error', cache: 'no-store',
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(invoke.mock.calls).toEqual([[channel, body]]);
   });
 
-  it.each(['CONFLICT', 'WRITE_UNCERTAIN', 'RATE_LIMITED'])(
+  it.each(configIpcErrorCodeSchema.options)(
     '保留业务错误码 %s，不自动重放写请求',
     async code => {
-      bootstrap();
-      fetchMock.mockResolvedValueOnce(json({ success: false, code, error: '安全错误提示' }, 409));
+      invoke.mockResolvedValueOnce({ success: false, code, cleanupFailed: false });
 
       await expect(client.deleteEntry(0, entry)).rejects.toMatchObject({
-        name: 'ApiError', code, message: '安全错误提示',
+        name: 'ApiError', code, message: expect.any(String),
       });
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(invoke.mock.calls).toEqual([['config:remove', { index: 0, expected }]]);
     },
   );
 
-  it('会话失效后不重新 bootstrap 或自动重放写请求', async () => {
-    bootstrap();
-    for (let i = 0; i < 2; i++) {
-      fetchMock.mockResolvedValueOnce(json({
-        success: false, code: 'SESSION_EXPIRED', error: '请刷新网页后重试。',
-      }, 403));
-    }
-
-    await expect(client.applyModelConfig(entry)).rejects.toMatchObject({ code: 'SESSION_EXPIRED' });
-    await expect(client.applyModelConfig(entry)).rejects.toMatchObject({ code: 'SESSION_EXPIRED' });
-    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
-      '/api/bootstrap', '/api/apply', '/api/apply',
-    ]);
-  });
-
-  it('写入时网络中断提示结果不确定，不暴露异常原文或重放', async () => {
-    bootstrap();
-    fetchMock.mockRejectedValueOnce(new Error('private-marker'));
-
-    await expect(client.addEntry(entry)).rejects.toMatchObject({
+  it('保留不确定写入与清理失败提示', async () => {
+    invoke.mockResolvedValueOnce({ success: false, code: 'WRITE_UNCERTAIN', cleanupFailed: true });
+    await expect(client.applyModelConfig(entry)).rejects.toMatchObject({
       code: 'WRITE_UNCERTAIN',
-      message: '请求结果无法确认，请刷新状态后检查；不要直接重复写入。',
+      message: '配置可能已写入，请重新读取核对；不要直接重复写入。 文件资源清理失败，需人工检查。',
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(invoke.mock.calls).toEqual([['config:apply', { expected }]]);
   });
 
-  it('bootstrap 失败后允许下一次显式读取重新连接', async () => {
-    fetchMock.mockRejectedValueOnce(new Error('private-marker'));
-    await expect(client.getConfigState()).rejects.toMatchObject({
-      code: 'NETWORK_ERROR', message: '无法连接本机服务，请确认服务已启动。',
+  it.each(['sync', 'async'])('通信异常 %s 不泄露原文或重放', async mode => {
+    invoke.mockImplementationOnce(() => {
+      if (mode === 'sync') throw new Error('private-marker');
+      return Promise.reject(new Error('private-marker'));
     });
-    bootstrap();
-    fetchMock.mockResolvedValueOnce(json({ success: true, data: state }));
+    await expect(client.addEntry(entry)).rejects.toMatchObject({
+      code: 'IPC_ERROR',
+      message: '配置通信失败，操作结果未知；请重新读取核对，勿自动重试。',
+    });
+    expect(invoke.mock.calls).toEqual([['config:add', { entry }]]);
+  });
+
+  it('通信失败后允许下一次显式读取，不自动重试', async () => {
+    invoke.mockRejectedValueOnce(new Error('private-marker'));
+    await expect(client.getConfigState()).rejects.toMatchObject({
+      code: 'IPC_ERROR',
+    });
+    expect(invoke.mock.calls).toEqual([['config:state', {}]]);
+    invoke.mockResolvedValueOnce({ success: true, data: state });
 
     expect(await client.getConfigState()).toEqual(state);
-    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
-      '/api/bootstrap', '/api/bootstrap', '/api/state',
+    expect(invoke.mock.calls).toEqual([
+      ['config:state', {}], ['config:state', {}],
     ]);
   });
 
-  it.each([
-    { success: true, data: { token: 'invalid' } },
-    { success: true, data: { token: 123 } },
-    { success: false, data: { token } },
-  ])('拒绝不合法 bootstrap 响应 %#', async value => {
-    fetchMock.mockResolvedValueOnce(json(value));
+  it.each([undefined, {}, { desktop: { platform: 'darwin' } }])(
+    '缺少桥接时明确报错且不回退 HTTP %#', async value => {
+      vi.stubGlobal('window', value);
+      for (const action of [client.getConfigState, () => client.applyModelConfig(entry)]) {
+        await expect(action()).rejects.toMatchObject({
+          code: 'DESKTOP_UNAVAILABLE',
+          message: '桌面配置桥接不可用，请使用桌面应用打开。',
+        });
+      }
+      expect(invoke).not.toHaveBeenCalled();
+    },
+  );
 
-    await expect(client.getConfigState()).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+  it('非法索引由真实桥接拒绝，不发送请求', async () => {
+    await expect(client.updateEntry(-1, entry, entry)).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    await expect(client.deleteEntry(0.5, entry)).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -166,34 +151,30 @@ describe('同源 API 客户端', () => {
     }] }] },
     { ...state, groups: null },
   ])('拒绝无法安全渲染的状态响应 %#', async value => {
-    bootstrap();
-    fetchMock.mockResolvedValueOnce(json({ success: true, data: value }));
+    invoke.mockResolvedValueOnce({ success: true, data: value });
 
-    await expect(client.getConfigState()).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+    await expect(client.getConfigState()).rejects.toMatchObject({ code: 'IPC_ERROR' });
+    expect(invoke.mock.calls).toEqual([['config:state', {}]]);
   });
 
   it('接受空列表及无激活状态', async () => {
     const empty = { entries: [], groups: [], activeIndex: -1 };
-    bootstrap();
-    fetchMock.mockResolvedValueOnce(json({ success: true, data: empty }));
+    invoke.mockResolvedValueOnce({ success: true, data: empty });
 
     expect(await client.getConfigState()).toEqual(empty);
   });
 
-  it.each([200, 500])('不展示非 JSON 响应原文（HTTP %s）', async status => {
-    bootstrap();
-    fetchMock.mockResolvedValueOnce(new Response('private-marker', { status }));
-
-    await expect(client.getConfigState()).rejects.toMatchObject({
-      code: 'INVALID_RESPONSE', message: '本机服务响应无效，请刷新网页确认状态。',
+  it.each([
+    undefined, 'private-marker', { success: true, data: state },
+    { success: false, code: 'private-marker', cleanupFailed: false },
+    { success: false, code: 'IO_FAILED', cleanupFailed: false, message: 'private-marker' },
+  ])('客户端再次拒绝损坏的桥接响应，不宣称写成功 %#', async value => {
+    const add = vi.fn().mockResolvedValue(value);
+    vi.stubGlobal('window', { desktop: { config: { add } } });
+    await expect(client.addEntry(entry)).rejects.toMatchObject({
+      code: 'IPC_ERROR',
+      message: '配置通信失败，操作结果未知；请重新读取核对，勿自动重试。',
     });
-  });
-
-  it('写接口返回非 204 时不宣称成功，也不重放', async () => {
-    bootstrap();
-    fetchMock.mockResolvedValueOnce(json({ success: true }));
-
-    await expect(client.addEntry(entry)).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(add.mock.calls).toEqual([[{ entry }]]);
   });
 });

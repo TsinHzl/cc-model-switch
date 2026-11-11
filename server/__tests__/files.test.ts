@@ -4,15 +4,17 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createFileStore, MAX_FILE_BYTES } from '../files.mjs';
-import { FileStoreError } from '../errors.mjs';
+import { createFileStore, MAX_FILE_BYTES, type FileKey, type FileStore } from '../files.js';
+import { FileStoreError } from '../errors.js';
 
 const exec = promisify(execFile);
 const unsupported = process.platform !== 'darwin'
   || process.getuid?.() === 0 || process.geteuid?.() === 0;
 
 describe.skipIf(unsupported)('本机文件 store', () => {
-  let home, paths, store;
+  let home: string;
+  let paths: Record<FileKey, string>;
+  let store: FileStore;
   const noTemporaryFiles = async () => {
     expect((await fs.readdir(home)).filter(name => name.startsWith('.ccms-'))).toEqual([]);
   };
@@ -42,7 +44,7 @@ describe.skipIf(unsupported)('本机文件 store', () => {
     expect(await store.read('zshrc')).toBe('0');
   });
 
-  it.each(['config', 'settings', 'zshrc'])('要求 %s 必须存在', async key => {
+  it.each(['config', 'settings', 'zshrc'] as const)('要求 %s 必须存在', async key => {
     await fs.unlink(paths[key]);
     await expect(store.read(key)).rejects.toMatchObject({ code: 'FILE_MISSING' });
     if (key !== 'settings') {
@@ -53,8 +55,8 @@ describe.skipIf(unsupported)('本机文件 store', () => {
   });
 
   it.each(['unknown', '../.zshrc', '__proto__', 'constructor'])('拒绝未知 key %s', async key => {
-    await expect(store.read(key)).rejects.toMatchObject({ code: 'UNKNOWN_KEY' });
-    await expect(store.update(key, () => 'changed')).rejects.toMatchObject({ code: 'UNKNOWN_KEY' });
+    await expect(store.read(key as FileKey)).rejects.toMatchObject({ code: 'UNKNOWN_KEY' });
+    await expect(store.update(key as FileKey, () => 'changed')).rejects.toMatchObject({ code: 'UNKNOWN_KEY' });
   });
 
   it('拒绝写 settings 和 root 启动', async () => {
@@ -146,13 +148,35 @@ describe.skipIf(unsupported)('本机文件 store', () => {
     expect(await store.read('config')).toBe('4');
   }, 15000);
 
-  it('拒绝真实 xattr，不改变原文件', async () => {
+  it('保留真实 xattr 并写新内容', async () => {
     await exec('/usr/bin/xattr', ['-w', 'com.cc-model-switch.test', 'present', paths.config], {
       timeout: 3000, maxBuffer: 65536, env: { LC_ALL: 'C', PATH: '/usr/bin:/bin' },
     });
-    await expect(store.update('config', () => '1'))
-      .rejects.toMatchObject({ code: 'METADATA_UNSUPPORTED' });
-    expect(await fs.readFile(paths.config, 'utf8')).toBe('0');
+    await expect(store.update('config', () => '1')).resolves.toBe('1');
+    expect(await fs.readFile(paths.config, 'utf8')).toBe('1');
+    const { stdout } = await exec('/usr/bin/xattr', ['-p', 'com.cc-model-switch.test', paths.config], {
+      timeout: 3000, maxBuffer: 65536, env: { LC_ALL: 'C', PATH: '/usr/bin:/bin' },
+    });
+    expect(stdout.trim()).toBe('present');
+    await noTemporaryFiles();
+  });
+
+  it('保留多个 xattr 的二进制值与含空格值', async () => {
+    await exec('/usr/bin/xattr', ['-wx', 'com.ccms.a', '00 01 02 FF', paths.config], {
+      timeout: 3000, maxBuffer: 65536, env: { LC_ALL: 'C', PATH: '/usr/bin:/bin' },
+    });
+    await exec('/usr/bin/xattr', ['-w', 'com.ccms.b', 'tok with space', paths.config], {
+      timeout: 3000, maxBuffer: 65536, env: { LC_ALL: 'C', PATH: '/usr/bin:/bin' },
+    });
+    await store.update('config', () => '1');
+    const a = await exec('/usr/bin/xattr', ['-px', 'com.ccms.a', paths.config], {
+      timeout: 3000, maxBuffer: 65536, env: { LC_ALL: 'C', PATH: '/usr/bin:/bin' },
+    });
+    expect(a.stdout.replace(/\s+/g, '').toLowerCase()).toBe('000102ff');
+    const b = await exec('/usr/bin/xattr', ['-p', 'com.ccms.b', paths.config], {
+      timeout: 3000, maxBuffer: 65536, env: { LC_ALL: 'C', PATH: '/usr/bin:/bin' },
+    });
+    expect(b.stdout.trim()).toBe('tok with space');
     await noTemporaryFiles();
   });
 
@@ -181,11 +205,8 @@ describe.skipIf(unsupported)('本机文件 store', () => {
     vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
       const handle = await originalOpen(...args);
       if (args[0] !== home) return handle;
-      return {
-        stat: handle.stat.bind(handle),
-        close: handle.close.bind(handle),
-        sync: async () => { throw new Error('injected directory sync failure'); },
-      };
+      vi.spyOn(handle, 'sync').mockRejectedValue(new Error('injected directory sync failure'));
+      return handle;
     });
     const transform = vi.fn(() => 'written');
     await expect(store.update('config', transform))

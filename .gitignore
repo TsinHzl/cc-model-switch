@@ -1,6 +1,9 @@
 node_modules/
 dist/
 dist-server/
+out/
+out-test/
+release/
 .server.log
 .server.pid
 tsconfig.tsbuildinfo

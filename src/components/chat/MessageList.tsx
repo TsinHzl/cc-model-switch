@@ -11,30 +11,40 @@ function isHttpUrl(url: string): boolean {
 function ReasoningBlock({ message }: { message: ChatMessage }) {
   const thinking = message.status === 'streaming' && message.reasoningMs === undefined;
   const [open, setOpen] = useState(thinking);
-  const [justDone, setJustDone] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (thinking && boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight;
   }, [message.reasoning, thinking]);
-  // 思考完毕（不再是 thinking）后延迟折叠折叠的既视感：先短暂保留打开态展示完整思考，
-  // 500ms 后自动收起。仅在本次从思考切换到完成的瞬间触发一次。
+  // 思考结束的瞬间自动收起一次（留 500ms 展示完整内容）。
+  // 只在「思考中 → 结束」这次跳变触发；用户之后手动展开不会被再次折叠。
+  const prevThinking = useRef(thinking);
+  const collapseTimer = useRef<number | null>(null);
   useEffect(() => {
-    if (!thinking && justDone && open) {
-      const t = window.setTimeout(() => setOpen(false), 500);
-      return () => window.clearTimeout(t);
-    }
-  }, [thinking, justDone, open]);
-  const fromThinking = useRef(thinking);
-  useEffect(() => {
-    if (fromThinking.current === true && thinking === false) setJustDone(true);
-    fromThinking.current = thinking;
+    const wasThinking = prevThinking.current;
+    prevThinking.current = thinking;
+    if (!(wasThinking && !thinking)) return;
+    collapseTimer.current = window.setTimeout(() => {
+      collapseTimer.current = null;
+      setOpen(false);
+    }, 500);
   }, [thinking]);
+  useEffect(() => () => {
+    if (collapseTimer.current !== null) window.clearTimeout(collapseTimer.current);
+  }, []);
+  // 手动点击时取消待执行的自动折叠，避免刚展开就被收起。
+  const toggle = () => {
+    if (collapseTimer.current !== null) {
+      window.clearTimeout(collapseTimer.current);
+      collapseTimer.current = null;
+    }
+    setOpen(prev => !prev);
+  };
   const label = thinking
     ? '思考中…'
     : message.reasoningMs !== undefined ? `思考 ${(message.reasoningMs / 1000).toFixed(1)}s` : '思考过程';
   return (
     <div className="chat-block">
-      <button type="button" className="chat-collapse" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button type="button" className="chat-collapse" aria-expanded={open} onClick={toggle}>
         {open ? '▾' : '▸'} {label}
       </button>
       {open && <div ref={boxRef} className="chat-reasoning">{message.reasoning}</div>}

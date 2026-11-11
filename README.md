@@ -44,6 +44,7 @@ npm run preview
 ## 功能
 
 - **模型切换**：按 URL → 渠道分组；按 model/base_url/key 三元组识别激活项。只更新 `.zshrc` 置顶标记块中的 7 个 `ANTHROPIC_*` export，保留 bash `printf %q` 等价转义，不修改或清理 settings.json。
+- **对话**：页签进入对话页，按配置条目选择模型；请求经主进程受限转发到该条目网关的 `/v1/messages`，密钥只在主进程解析，不出 renderer。支持流式回复、停止、重生成、思考过程折叠、联网搜索、图片/文本附件与 Markdown 渲染（react-markdown + remark-gfm，无 raw HTML、仅 http(s) 链接、图片降级文本）。会话与附件占位仅存 renderer 本地存储，可重启恢复。
 - **激活态**：优先读取 settings.json env，三元组全部为空或解析失败时回退 zshrc。写入 zshrc 后仍可能显示 settings 中的旧模型，这是既定优先级，不强制高亮刚选中的条目。
 - **配置管理**：新增、编辑、删除只写 change-ai-config.json，保持四空格缩进和末尾换行；默认隐藏 key，可切明文、复制、搜索及按分组快捷新增。
 - **冲突保护**：主进程写前重读最新内容；切换按三元组定位，编辑/删除校验原数组下标与三元组。写操作进程内串行，并在替换前复核目标及依赖，写后回读。此机制不是跨进程 CAS，不能保证与外部工具绝对互斥。

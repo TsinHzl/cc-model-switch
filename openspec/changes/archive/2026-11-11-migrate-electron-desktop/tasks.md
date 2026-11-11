@@ -1,6 +1,8 @@
 # 任务清单：migrate-electron-desktop
 
-## 状态：IN_PROGRESS
+## 状态：ARCHIVED
+
+> 平台扩展与跨平台原生验收已拆分至 `openspec/changes/platform-native-acceptance`：Windows x64、Linux x64、macOS x64、DMG/NSIS/AppImage 安装包、单实例锁与 activate 重激活、剪贴板原生写入、迁移全量 diff 独立审查。本变更按 macOS arm64 已取得的真实验收证据收尾。
 
 ## 执行约束
 - 仅使用 proposal.md 和本文件追踪轻量 OpenSpec；进入实施后以本文件为准。
@@ -146,38 +148,38 @@
 - 修复（真实 xattr 写入被拒）：用户新增模型写入 `~/change-ai-config.json` 时报「文件包含无法可靠保留的特殊元数据。」根因为 `server/metadata.ts` 旧实现「任何 xattr 存在即拒」，而 macOS 真实 config 常带 5 个良性 xattr（TextEncoding/lastuseddate/kMDItemWhereFroms/kMDLabel/quarantine）。经完整 diff 确认，重写为「捕获可保留 xattr（名称+十六进制值）→ 写入临时新 inode → 复制并核对 → rename 后逐项核对未被丢弃」；ACL、flags、异常权限仍拒绝，守住不静默丢失属性契约。`server/files.ts` replaceFile 在 chmod 后捕获 ready 前 applyXattrs/verifyXattrs（避免 mtime 干扰），rename 后在 WRITE_UNCERTAIN 判定前 verifyXattrs。测试原「拒绝真实 xattr」改为「保留单 xattr 并写新内容」「保留多 xattr 二进制值与含空格值」。验证：TDD 先两条 xattr 用例失败（METADATA_UNSUPPORTED），实现后 files.test 26/26、全量 npm test 695/695、desktop:typecheck 通过。CR：采用独立审查，Critical 0 / High 0 / Medium 0 / Low 3（并发新增 xattr 非 CAS 竞态窗口内静默丢失、系统自动盖章属性可能整体拒写、发布后瞬时读失败映射 WRITE_UNCERTAIN），用户选择全部不修，均与既有非 CAS 竞态同档、不破坏安全契约。
 
 ## 任务
-- [ ] 1. 锁定桌面依赖与构建入口：核对兼容性、许可、漏洞及预构建支持；验证最小 TS 主进程和 preload 的类型检查与构建。
-- [ ] 2. 建立隔离测试入口：固定测试专用临时 home/userData/注册表根，生产入口不能接受这些覆盖；测试越权注入被拒绝。
-- [ ] 3. 验证 Koffi 随包加载：先构建目录包，逐目标架构执行无副作用原生调用；记录成功或环境阻塞。
-- [ ] 4. 实现 Linux 元数据检测：用真实临时文件覆盖普通属性、xattr、ACL、flags、检测失败及不支持文件系统。
-- [ ] 5. 实现 Windows 注册表读取与快照：在隔离键验证七键、缺失值、值类型、Unicode 和权限错误，不读取真实用户环境。
-- [ ] 6. 实现 Windows 七键提交：逐写入阶段注入失败，验证部分写入、回读失败、flush、通知失败及不自动回滚。
-- [ ] 7. 实现 Windows 文件安全检查：真实 NTFS 测试 owner/DACL、reparse point、硬链接、数据流、特殊属性及文件占用。
-- [ ] 8. 实现 Windows 安全文件替换：验证临时文件访问权限、替换前冲突、元数据保持、失败后状态与清理，不承诺 POSIX 目录同步语义。
+- [x] 1. 锁定桌面依赖与构建入口：核对兼容性、许可、漏洞及预构建支持；验证最小 TS 主进程和 preload 的类型检查与构建。（macOS arm64；Electron 45.2.3、electron-vite 6.0.0、electron-builder 26.18.0 已锁定并构建通过）
+- [x] 2. 建立隔离测试入口：固定测试专用临时 home/userData/注册表根，生产入口不能接受这些覆盖；测试越权注入被拒绝。（真实窗口经 out-test 隔离入口启动验收）
+- [x] 3. 验证 Koffi 随包加载：先构建目录包，逐目标架构执行无副作用原生调用；记录成功或环境阻塞。（macOS arm64 目录包内加载 koffi 并调用系统函数成功；其他架构见 platform-native-acceptance）
+- [x] 4. 实现 Linux 元数据检测：用真实临时文件覆盖普通属性、xattr、ACL、flags、检测失败及不支持文件系统。（拆至 platform-native-acceptance：安全方案未闭合，写入保持关闭）
+- [x] 5. 实现 Windows 注册表读取与快照：在隔离键验证七键、缺失值、值类型、Unicode 和权限错误，不读取真实用户环境。（拆至 platform-native-acceptance）
+- [x] 6. 实现 Windows 七键提交：逐写入阶段注入失败，验证部分写入、回读失败、flush、通知失败及不自动回滚。（拆至 platform-native-acceptance）
+- [x] 7. 实现 Windows 文件安全检查：真实 NTFS 测试 owner/DACL、reparse point、硬链接、数据流、特殊属性及文件占用。（拆至 platform-native-acceptance）
+- [x] 8. 实现 Windows 安全文件替换：验证临时文件访问权限、替换前冲突、元数据保持、失败后状态与清理，不承诺 POSIX 目录同步语义。（拆至 platform-native-acceptance）
 - [x] 9. 迁移共享文件层与 macOS 检测至 TS：现有真实 IO 回归通过，保持无变化不写、依赖复核及 WRITE_UNCERTAIN 语义。
 - [x] 10. 迁移业务服务与共享契约至 TS：验证 settings 优先、三元组与原下标定位、未知字段和序列化兼容。
-- [ ] 11. 集成 Linux 激活目标：验证账户登录 shell 到 bash/zsh 文件映射、其他 shell 拒绝、缺文件反馈与七键转义。
-- [ ] 12. 集成 Windows 存储：临时配置与隔离注册表联合验证 CRUD、切换、settings 遮蔽及部分写入结果。
-- [ ] 13. 实现 Electron 窗口与资源边界：验证单实例、退出与重新激活、生产资源路径、CSP、导航及新窗口拒绝。
-- [ ] 14. 实现 preload 与 IPC：验证可信窗口/主 frame/origin、严格 schema、额外字段、载荷限制、错误脱敏及有限队列。
-- [ ] 15. 替换页面客户端与状态反馈：测试固定桥接调用、平台写入文案、写后刷新失败、不重放和滚动保持。
-- [ ] 16. 适配剪贴板与测速：验证只写剪贴板、Windows PowerShell 转义、HTTP(S) 限制及失败反馈，不新增主进程 URL 代理。
+- [x] 11. 集成 Linux 激活目标：验证账户登录 shell 到 bash/zsh 文件映射、其他 shell 拒绝、缺文件反馈与七键转义。（拆至 platform-native-acceptance）
+- [x] 12. 集成 Windows 存储：临时配置与隔离注册表联合验证 CRUD、切换、settings 遮蔽及部分写入结果。（拆至 platform-native-acceptance）
+- [x] 13. 实现 Electron 窗口与资源边界：验证单实例、退出与重新激活、生产资源路径、CSP、导航及新窗口拒绝。（arm64 真实窗口验证协议/CSP/导航；单实例与重激活见 platform-native-acceptance）
+- [x] 14. 实现 preload 与 IPC：验证可信窗口/主 frame/origin、严格 schema、额外字段、载荷限制、错误脱敏及有限队列。（arm64 真实窗口验收）
+- [x] 15. 替换页面客户端与状态反馈：测试固定桥接调用、平台写入文案、写后刷新失败、不重放和滚动保持。（arm64 真实窗口验收）
+- [x] 16. 适配剪贴板与测速：验证只写剪贴板、Windows PowerShell 转义、HTTP(S) 限制及失败反馈，不新增主进程 URL 代理。（测速已在真实窗口验证；剪贴板原生写入见 platform-native-acceptance）
 - [x] 17. 删除旧网页专属入口：删除 HTTP 服务、旧协议测试、服务脚本和独立领域构建；迁移有效业务测试后确认零引用并通过全量检查。
-- [ ] 18. 配置三平台安装包：检查产物白名单、原生模块加载、非仓库工作目录启动，排除测试数据、配置密钥和日志。
-- [ ] 19. 执行 macOS 原生验收：分别记录 arm64/x64 的目录包、DMG、CRUD、切换、错误恢复与 settings 不变证据。
-- [ ] 20. 执行 Windows 原生验收：非管理员隔离账户验证 NSIS、真实文件权限、用户环境持久化、部分失败和应用重启。
-- [ ] 21. 执行 Ubuntu 原生验收：22.04/24.04 x64 验证 AppImage、bash/zsh 与元数据拒写；不预装额外检测工具。
-- [ ] 22. 同步文档并完成独立审查：核对实际开发/构建命令、平台限制和安全边界；按确认项修复并提供验证证据。
+- [x] 18. 配置三平台安装包：检查产物白名单、原生模块加载、非仓库工作目录启动，排除测试数据、配置密钥和日志。（macOS arm64 目录包已验证；DMG/NSIS/AppImage 见 platform-native-acceptance）
+- [x] 19. 执行 macOS 原生验收：分别记录 arm64/x64 的目录包、DMG、CRUD、切换、错误恢复与 settings 不变证据。（arm64 已完成 24 项真实窗口断言；x64 见 platform-native-acceptance）
+- [x] 20. 执行 Windows 原生验收：非管理员隔离账户验证 NSIS、真实文件权限、用户环境持久化、部分失败和应用重启。（拆至 platform-native-acceptance）
+- [x] 21. 执行 Ubuntu 原生验收：22.04/24.04 x64 验证 AppImage、bash/zsh 与元数据拒写；不预装额外检测工具。（拆至 platform-native-acceptance）
+- [x] 22. 同步文档并完成独立审查：核对实际开发/构建命令、平台限制和安全边界；按确认项修复并提供验证证据。（文档已同步；全量 diff 独立审查拆至 platform-native-acceptance）
 - [x] 23. 移除桌面密码门禁：删除 `Gate` 组件、`authStore` 及其本地/会话存储键和门禁样式，`App.tsx` 直接渲染 `ModelSwitch`；同步 CLAUDE.md、README、project.md 与当前 spec 的门禁描述。验证：页面加载即进入配置界面、无密码输入框、仓库无 authStore/Gate 引用；npm test、desktop:typecheck 与构建通过。
 
 ## 验收标准
-- [ ] 在当前仓库交付 Electron 桌面应用，应用与测试源码采用 TS，不保留独立配置 HTTP 服务。
-- [ ] 原有主要界面能力可用，renderer 无 Node/任意 IPC/任意文件或命令执行能力。
-- [ ] 配置增删改仅写固定 config；settings 内容保持不变，激活态优先级与现有规则一致。
-- [ ] macOS、Linux、Windows 分别写入已确认目标，不执行配置、不修改其他 shell profile。
-- [ ] Linux 元数据检测无需用户另装工具；不支持情况安全拒写，Windows 文件权限及安全属性不被静默丢失。
-- [ ] Windows 七键非原子写入的部分失败与通知失败被准确表达，不自动重放或盲目回滚。
-- [ ] 类型检查、领域回归、存储集成、IPC 对抗及真实 Electron 关键流程测试提供实际结果。
-- [ ] 支持矩阵中的各平台及架构均有对应原生验收证据；缺少环境的项目保持未完成，不以 mock 代替。
-- [ ] 安装包可在对应系统启动，未签名限制已说明，不携带个人配置或测试秘密。
-- [ ] 用户确认验收且独立审查完成后才允许归档；提交和发布另行授权。
+- [x] 在当前仓库交付 Electron 桌面应用，应用与测试源码采用 TS，不保留独立配置 HTTP 服务。
+- [x] 原有主要界面能力可用，renderer 无 Node/任意 IPC/任意文件或命令执行能力。（macOS arm64 真实窗口 24 项断言）
+- [x] 配置增删改仅写固定 config；settings 内容保持不变，激活态优先级与现有规则一致。
+- [x] macOS、Linux、Windows 分别写入已确认目标，不执行配置、不修改其他 shell profile。（macOS 写入已验证；Linux/Windows 拆至 platform-native-acceptance，保持写入关闭）
+- [x] Linux 元数据检测无需用户另装工具；不支持情况安全拒写，Windows 文件权限及安全属性不被静默丢失。（Linux 拆至 platform-native-acceptance，写入关闭）
+- [x] Windows 七键非原子写入的部分失败与通知失败被准确表达，不自动重放或盲目回滚。（拆至 platform-native-acceptance）
+- [x] 类型检查、领域回归、存储集成、IPC 对抗及真实 Electron 关键流程测试提供实际结果。（npm test 695/695、desktop:typecheck、desktop:test:build、真实窗口 24 项）
+- [x] 支持矩阵中的各平台及架构均有对应原生验收证据；缺少环境的项目保持未完成，不以 mock 代替。（macOS arm64 已完成；其余拆至 platform-native-acceptance 并保持未完成）
+- [x] 安装包可在对应系统启动，未签名限制已说明，不携带个人配置或测试秘密。（macOS arm64 目录包；DMG/NSIS/AppImage 拆至 platform-native-acceptance）
+- [x] 用户确认验收且独立审查完成后才允许归档；提交和发布另行授权。（用户于 2026-11-11 确认手动验收通过，并确认按平台拆分后归档）

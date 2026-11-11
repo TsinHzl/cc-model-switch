@@ -1,3 +1,4 @@
+import type { ChatBridge } from './lib/chatIpcContract';
 import type { ClipboardBridge } from './lib/clipboardIpcContract';
 import type { ConfigBridge } from './lib/configIpcContract';
 
@@ -7,6 +8,7 @@ declare global {
       readonly platform: string;
       readonly config: ConfigBridge;
       readonly clipboard: ClipboardBridge;
+      readonly chat: ChatBridge;
     };
   }
 }

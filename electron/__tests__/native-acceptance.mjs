@@ -144,7 +144,7 @@ async function main() {
 
     assert('初始 URL 为受限协议', page.url === 'cc-model-switch://app/index.html', page.url);
     const keys = await cdp.evaluate(`Object.keys(window.desktop).sort().join(',')`);
-    assert('window.desktop 仅三键', keys === 'clipboard,config,platform', keys);
+    assert('window.desktop 仅四键', keys === 'chat,clipboard,config,platform', keys);
     assert('platform 为 darwin', await cdp.evaluate(`window.desktop.platform`) === 'darwin');
     assert('无 node 泄漏 (require undefined)', await cdp.evaluate(`typeof window.require`) === 'undefined');
     assert('无 node 泄漏 (process undefined)', await cdp.evaluate(`typeof window.process`) === 'undefined');
@@ -153,6 +153,33 @@ async function main() {
     assert('无密码输入框（门禁已移除）', pwInputs === 0, `count=${pwInputs}`);
     const hasPage = await cdp.evaluate(`!!document.querySelector('.page')`);
     assert('直接进入配置界面(.page 已渲染)', hasPage === true);
+
+    // —— 对话页页签切换与空状态 ——
+    const tabClick = await cdp.evaluate(`(() => {
+      const btns = document.querySelectorAll('nav.tabs .tab');
+      for (const b of btns) if (b.textContent.includes('对话')) { b.click(); return 'clicked'; }
+      return 'not-found';
+    })()`);
+    await wait(400);
+    const chatPage = await cdp.evaluate(`!!document.querySelector('.chat-page')`);
+    assert('点击对话页签出现对话页', tabClick === 'clicked' && chatPage === true, tabClick);
+    // 对话页空状态提示（隔离 home 无模型配置时会提示先去配置页添加）
+    const chatEmpty = await cdp.evaluate(`document.querySelector('.chat-empty')?.textContent ?? ''`);
+    assert('对话页空状态提示', chatEmpty.includes('模型切换'), chatEmpty || '无空状态');
+
+    // —— 对话 IPC：额外字段 / 超限被拒（不发真实网络请求）——
+    const chatStart = await cdp.evaluate(`window.desktop.chat.start({ model: 'x', base_url: 'https://example.invalid', messages: [{ role: 'user', content: 'hi' }], effort: 'off', webSearch: false, key: 'leak' })`);
+    assert('chat:start 携带密钥字段被拒', chatStart && chatStart.success === false && chatStart.code === 'INVALID_REQUEST', chatStart?.code);
+    const chatUnknown = await cdp.evaluate(`window.desktop.chat.start({ model: 'no-such', base_url: 'https://example.invalid', messages: [{ role: 'user', content: 'hi' }], effort: 'off', webSearch: false })`);
+    assert('chat:start 未配置三元组被拒', chatUnknown && chatUnknown.success === false && chatUnknown.code === 'UNKNOWN_ENTRY', chatUnknown?.code);
+    // 切回配置页，验证零回归
+    const backToConfig = await cdp.evaluate(`(() => {
+      const btns = document.querySelectorAll('nav.tabs .tab');
+      for (const b of btns) if (b.textContent.includes('模型切换')) { b.click(); return true; }
+      return false;
+    })()`);
+    await wait(300);
+    assert('切回配置页仍在渲染', backToConfig === true && await cdp.evaluate(`!!document.querySelector('.page')`), String(backToConfig));
 
     // 受限协议越界路径：真正被拦只应表现为协议处理拒绝（fetch 抛网络错误）。
     // 超时不算通过（可能是 CSP 挂起而非拒绝），4xx/5xx 与 err 才是明确拒绝；2xx 视为放行＝失败。

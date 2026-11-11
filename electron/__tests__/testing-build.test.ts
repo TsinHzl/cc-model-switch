@@ -7,6 +7,7 @@ import { normalizePath } from 'vite';
 import { describe, expect, it, vi } from 'vitest';
 import production from '../../electron.vite.config';
 import isolated from '../../electron.test.vite.config';
+import type { ChatBridge } from '../../src/lib/chatIpcContract';
 import type { ClipboardBridge } from '../../src/lib/clipboardIpcContract';
 import type { ConfigBridge } from '../../src/lib/configIpcContract';
 
@@ -49,16 +50,19 @@ function loadPreload(code: string) {
   expect(requireModule.mock.calls).toEqual([['electron']]);
   expect(expose).toHaveBeenCalledTimes(1);
   const [name, desktop] = expose.mock.calls[0] as [
-    string, { platform: string; config: ConfigBridge; clipboard: ClipboardBridge },
+    string,
+    { platform: string; config: ConfigBridge; clipboard: ClipboardBridge; chat: ChatBridge },
   ];
   expect(name).toBe('desktop');
-  expect(Object.keys(desktop)).toEqual(['platform', 'config', 'clipboard']);
+  expect(Object.keys(desktop)).toEqual(['platform', 'config', 'clipboard', 'chat']);
   expect(desktop.platform).toBe('fixture-platform');
   expect(Object.isFrozen(desktop)).toBe(true);
   expect(Object.keys(desktop.config)).toEqual(['state', 'apply', 'add', 'edit', 'remove']);
   expect(Object.isFrozen(desktop.config)).toBe(true);
   expect(Object.keys(desktop.clipboard)).toEqual(['writeText']);
   expect(Object.isFrozen(desktop.clipboard)).toBe(true);
+  expect(Object.keys(desktop.chat)).toEqual(['start', 'cancel', 'onChunk']);
+  expect(Object.isFrozen(desktop.chat)).toBe(true);
   expect(invoke).not.toHaveBeenCalled();
   expect(runInNewContext('typeof Buffer', sandbox)).toBe('undefined');
   return { bridge: desktop.config, clipboard: desktop.clipboard, invoke, receiver: ipcRenderer };

@@ -32,8 +32,9 @@ npx tsc -b                 # 页面类型检查；仓库无 ESLint/Prettier 配�
 - `electron/main.ts` 显式启动 `bootstrap`，生产 home 来自 `os.userInfo().homedir`；`electron/testing/main.ts` 使用隔离资源，不允许 renderer 指定 home。
 - `electron.vite.config.ts` 构建 main/preload/renderer 到 `out`；测试配置单向复用并输出到 `out-test`。根 `vite.config.ts` 仅保留测试转换配置。
 - `electron/renderer.ts` 生产使用受限本地资源协议及 CSP；开发仅接受固定 `http://127.0.0.1:5173`，没有配置 HTTP API。
-- 页面禁用 Node，启用 sandbox、contextIsolation、webSecurity，禁止 webview；preload 只暴露 platform、五个配置方法和只写剪贴板，不暴露通用 IPC、FFI、路径、命令或 URL 代理。
+- 页面禁用 Node，启用 sandbox、contextIsolation、webSecurity，禁止 webview；preload 只暴露 platform、五个配置方法、只写剪贴板和 `chat`（start/cancel/onChunk），不暴露通用 IPC、FFI、路径、命令或 URL 代理。
 - 配置 IPC 检查当前窗口、主 frame、实际 origin 与页面地址、严格结构及 64 KiB 紧凑 JSON 等价预算；五方法共用一个在途名额，忙时拒绝、不排队。预算不覆盖传输前克隆开销，单名额不是频率限流。
+- 对话 `chat:start` 只收 `model + base_url` 与消息体，主进程按二者在最新 config 中定位自取 key，只允许 http(s)、禁止重定向、保留 TLS 校验，单条在途；密钥不进入 renderer，错误不暴露原文。
 - `server/files.ts` 固定 config（`~/change-ai-config.json`）、settings（`~/.claude/settings.json`）、zshrc（`~/.zshrc`）；只有 config/zshrc 可写。
 - `server/service.ts` 用 Zod 校验业务输入和磁盘列表，直接导入 `applyConfig.ts`、`configModel.ts` 纯函数；不要复制转义或分组算法。错误不暴露文件原文、密钥或真实 home。
 
@@ -66,9 +67,10 @@ npx tsc -b                 # 页面类型检查；仓库无 ESLint/Prettier 配�
 
 ## UI 结构
 
-页面由 `App.tsx` 直接进入单页 `ModelSwitch`，包含搜索、分组、切换确认与增删改弹窗。桌面应用不设密码门禁：启动即进入配置管理，访问控制由操作系统账户与文件权限负责，IPC 不因此被视为恶意本机进程隔离边界。
+页面由 `App.tsx` 提供「模型切换 / 对话」两个页签；配置页为单页 `ModelSwitch`（搜索、分组、切换确认与增删改弹窗），对话页 `ChatPage` 组合侧栏、消息区与输入区。桌面应用不设密码门禁：启动即进入配置管理，访问控制由操作系统账户与文件权限负责，IPC 不因此被视为恶意本机进程隔离边界。
 
 - key 默认由 `maskKey()` 脱敏。测速仍由 renderer 发起，仅允许 HTTP(S)，不携带配置密钥，不增加主进程代理。
+- 对话页会话/选择/活动会话仅存 renderer localStorage（`ccms.chat.v1.*`），超限降级为内存并提示；保存剥离附件 正文 data。直接进入对话页即恢复上次会话，不触碰配置文件。Markdown 用 react-markdown + remark-gfm（无 raw HTML、仅 http(s)、图片降级文本）。
 - 复制经 `desktop.clipboard.writeText`，仅写、单在途、1 MiB 原始 UTF-8 上限，等待原生 Promise 完成；失败或结果未知可能已改变剪贴板，不自动重试。
 - Env 在 macOS/Linux 保留 shell 格式，Windows 使用 PowerShell 当前会话赋值，不执行、不持久化；空值遵循目标 PowerShell 版本语义。
 - home/userData 隔离不隔离系统剪贴板；原生剪贴板验收须另获授权，使用隔离账户/会话或虚拟机及合成文本，不读取个人剪贴板。

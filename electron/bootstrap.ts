@@ -2,8 +2,10 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, protocol, session } fro
 import { fileURLToPath } from 'node:url';
 import { createFileStore } from '../server/files.js';
 import { createService } from '../server/service.js';
+import { chatChannels } from '../src/lib/chatIpcContract';
 import { clipboardIpcChannel } from '../src/lib/clipboardIpcContract';
 import { configIpcChannels } from '../src/lib/configIpcContract';
+import { createChatHandlers } from './chatIpc';
 import { createClipboardHandler } from './clipboardIpc';
 import { createConfigHandlers } from './configIpc';
 import { getRendererUrl, RENDERER_SCHEME, serveRenderer } from './renderer';
@@ -15,14 +17,27 @@ let trustedWindow: {
 
 function registerAppIpc(
   options: Parameters<typeof createConfigHandlers>[0],
+  store: Parameters<typeof createChatHandlers>[0]['store'],
 ): () => void {
   const handlers = createConfigHandlers(options);
   const clipboardHandler = createClipboardHandler({
     getTrustedWindow: options.getTrustedWindow,
     writeText: text => clipboard.writeText(text),
   });
+  const chatHandlers = createChatHandlers({
+    store,
+    getTrustedWindow: options.getTrustedWindow,
+    send: chunk => {
+      const target = options.getTrustedWindow()?.window;
+      if (!target || target.isDestroyed() || target.webContents.isDestroyed()) {
+        throw new Error('window unavailable');
+      }
+      target.webContents.send(chatChannels.chunk, chunk);
+    },
+  });
   const registered: string[] = [];
   const dispose = () => {
+    chatHandlers.dispose();
     for (const channel of registered.splice(0)) ipcMain.removeHandler(channel);
   };
   try {
@@ -33,6 +48,10 @@ function registerAppIpc(
     }
     ipcMain.handle(clipboardIpcChannel, clipboardHandler);
     registered.push(clipboardIpcChannel);
+    ipcMain.handle(chatChannels.start, chatHandlers.start);
+    registered.push(chatChannels.start);
+    ipcMain.handle(chatChannels.cancel, chatHandlers.cancel);
+    registered.push(chatChannels.cancel);
   } catch (error) {
     dispose();
     throw error;
@@ -110,7 +129,7 @@ export async function bootstrap(
     session.defaultSession.on('will-download', event => event.preventDefault());
     const root = fileURLToPath(new URL('../renderer/', import.meta.url));
     protocol.handle(RENDERER_SCHEME, request => serveRenderer(request, root));
-    dispose = registerAppIpc({ service, getTrustedWindow: () => trustedWindow });
+    dispose = registerAppIpc({ service, getTrustedWindow: () => trustedWindow }, store);
     app.on('will-quit', stop);
     app.on('activate', () => {
       if (!stopped && !trustedWindow) void createWindow().catch(fail);

@@ -156,7 +156,7 @@ describe('桌面启动边界', () => {
     expect(startup.loadURL).toHaveBeenCalledOnce();
     expect(startup.handleIpc.mock.calls.map(([channel]) => channel)).toEqual([
       'config:state', 'config:apply', 'config:add', 'config:edit', 'config:remove',
-      'clipboard:writeText',
+      'clipboard:writeText', 'chat:start', 'chat:cancel',
     ]);
     expect(startup.writeText).not.toHaveBeenCalled();
     expect(startup.handleIpc.mock.invocationCallOrder.at(-1))

@@ -298,7 +298,7 @@ const capture = (home: string) => ['change-ai-config.json', '.claude/settings.js
   });
 
 const configChannels = ['config:state', 'config:apply', 'config:add', 'config:edit', 'config:remove'];
-const channels = [...configChannels, 'clipboard:writeText'];
+const channels = [...configChannels, 'clipboard:writeText', 'chat:start', 'chat:cancel'];
 const failure = (code: string) => ({ success: false, code, cleanupFailed: false });
 const clipboardFailure = (code: string) => ({ success: false, code });
 const eventFor = (window: TestWindow) => ({

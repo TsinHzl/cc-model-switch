@@ -181,6 +181,10 @@
 .markdown th, .markdown td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
 .markdown blockquote { border-left: 3px solid var(--border); margin: 8px 0; padding-left: 10px; color: var(--text-secondary); }
 .markdown h1, .markdown h2, .markdown h3 { margin: 10px 0 6px; }
+/* 全局 reset 把 ul/ol 的默认缩进清零，标记会画到容器外被 overflow 裁掉。 */
+.markdown ul, .markdown ol { padding-left: 1.5em; margin: 6px 0; }
+.markdown li { margin: 2px 0; }
+.markdown li > ul, .markdown li > ol { margin: 2px 0; }
 
 /* 代码块复制按钮样式对齐（可选） */
 .markdown .chat-img-placeholder { color: var(--text-dim); font-style: italic; }

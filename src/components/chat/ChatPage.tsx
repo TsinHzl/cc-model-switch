@@ -158,6 +158,14 @@ export function ChatPage() {
     refreshSessions();
   }, [refreshSessions]);
 
+  // 流式期间只更新内存，结束（完成/停止/失败）时把整轮对话落盘。
+  // 否则切到别的 tab 会卸载本页，最后一条 AI 回复从未写过 localStorage，切回即丢失。
+  const wasGeneratingRef = useRef(isGenerating);
+  useEffect(() => {
+    if (wasGeneratingRef.current && !isGenerating) persist(messagesRef.current);
+    wasGeneratingRef.current = isGenerating;
+  }, [isGenerating, persist]);
+
   // 首次进入：恢复本地活动会话；随后每次切回本页时刷新历史索引
   const initRef = useRef(false);
   useEffect(() => {

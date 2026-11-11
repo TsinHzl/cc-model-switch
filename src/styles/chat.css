@@ -89,8 +89,11 @@
 .chat-collapse:hover { color: var(--text); }
 .chat-reasoning {
   margin-top: 6px; max-height: 240px; overflow-y: auto; border-left: 2px solid var(--border);
-  padding-left: 10px; font-size: 12.5px; color: var(--text-secondary); white-space: pre-wrap;
+  padding-left: 10px; font-size: 12.5px; color: var(--text-secondary);
 }
+.chat-reasoning .markdown { font-size: 12.5px; line-height: 1.6; color: inherit; }
+.chat-reasoning .markdown p { margin: 4px 0; }
+.chat-reasoning .markdown pre { font-size: 12px; }
 .chat-search-results { list-style: none; padding-left: 12px; font-size: 12.5px; margin: 6px 0; }
 .chat-search-results li { margin-bottom: 6px; }
 .chat-search-results a { color: var(--accent); text-decoration: none; }

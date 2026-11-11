@@ -47,7 +47,11 @@ function ReasoningBlock({ message }: { message: ChatMessage }) {
       <button type="button" className="chat-collapse" aria-expanded={open} onClick={toggle}>
         {open ? '▾' : '▸'} {label}
       </button>
-      {open && <div ref={boxRef} className="chat-reasoning">{message.reasoning}</div>}
+      {open && (
+        <div ref={boxRef} className="chat-reasoning">
+          <Markdown text={message.reasoning ?? ''} />
+        </div>
+      )}
     </div>
   );
 }

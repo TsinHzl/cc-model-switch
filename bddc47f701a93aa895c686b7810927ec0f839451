@@ -1,0 +1,101 @@
+src/components/chat/Composer.tsx
+  98c4f36a379c1547 1-179
+electron/chatBridge.ts
+  98c4f36a379c1547 1-44
+src/components/__tests__/Markdown.test.tsx
+  98c4f36a379c1547 1-38
+electron/__tests__/native-acceptance.mjs
+  98c4f36a379c1547 147,157-183
+electron/__tests__/renderer.test.ts
+  98c4f36a379c1547 159
+electron/__tests__/chatIpc.test.ts
+  98c4f36a379c1547 1-300
+src/lib/chatStream.ts
+  98c4f36a379c1547 1-118
+CLAUDE.md
+  98c4f36a379c1547 35,37,70,73
+electron/__tests__/testing-main.test.ts
+  98c4f36a379c1547 301
+openspec/changes/archive/2026-11-11-migrate-electron-desktop/tasks.md
+  98c4f36a379c1547 1-185
+src/lib/thinking.ts
+  98c4f36a379c1547 1-48
+src/lib/__tests__/chatIpcContract.test.ts
+  98c4f36a379c1547 1-130
+electron/__tests__/testing-build.test.ts
+  98c4f36a379c1547 10,53-54,57,64-65
+src/lib/__tests__/chatStore.test.ts
+  98c4f36a379c1547 1-136
+src/components/chat/Markdown.tsx
+  98c4f36a379c1547 1-50
+src/styles/chat.css
+  98c4f36a379c1547 1-159
+openspec/project.md
+  98c4f36a379c1547 7,18
+openspec/changes/archive/2026-11-11-migrate-electron-desktop/proposal.md
+  98c4f36a379c1547 1-71
+src/lib/chatIpcContract.ts
+  98c4f36a379c1547 1-136
+electron/chatIpc.ts
+  98c4f36a379c1547 1-250
+src/lib/sse.ts
+  98c4f36a379c1547 1-197
+openspec/changes/platform-native-acceptance/tasks.md
+  98c4f36a379c1547 1-41
+src/desktop.d.ts
+  98c4f36a379c1547 1,11
+src/App.tsx
+  98c4f36a379c1547 1,3-5,7,10-42
+src/lib/__tests__/thinking.test.ts
+  98c4f36a379c1547 1-72
+src/lib/chatHistory.ts
+  98c4f36a379c1547 1-24
+openspec/changes/platform-native-acceptance/proposal.md
+  98c4f36a379c1547 1-35
+openspec/specs/chat-playground/spec.md
+  98c4f36a379c1547 1-114
+src/lib/__tests__/sse.test.ts
+  98c4f36a379c1547 1-129
+electron/preload.ts
+  98c4f36a379c1547 1-2,10-18
+src/lib/chatStore.ts
+  98c4f36a379c1547 1-224
+src/components/chat/SessionsSidebar.tsx
+  98c4f36a379c1547 1-82
+src/components/chat/ChatPage.tsx
+  98c4f36a379c1547 1-362
+src/lib/__tests__/chatStream.test.ts
+  98c4f36a379c1547 1-113
+src/components/__tests__/chatComponents.test.tsx
+  98c4f36a379c1547 1-86
+src/lib/chatTypes.ts
+  98c4f36a379c1547 1-48
+src/components/chat/MessageList.tsx
+  98c4f36a379c1547 1-139
+src/components/chat/AttachmentView.tsx
+  98c4f36a379c1547 1-29
+README.md
+  98c4f36a379c1547 47
+electron/bootstrap.ts
+  98c4f36a379c1547 5,8,20,27-37,40,51-54,132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "bddc47f701a93aa895c686b7810927ec0f839451",
+  "prompts": {
+    "98c4f36a379c1547": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6af1456f-b119-4f36-a785-9aa212f8a96f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 4926,
+      "total_deletions": 969,
+      "accepted_lines": 4000,
+      "overriden_lines": 0
+    }
+  }
+}

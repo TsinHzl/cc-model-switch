@@ -9,12 +9,26 @@ function isHttpUrl(url: string): boolean {
 }
 
 function ReasoningBlock({ message }: { message: ChatMessage }) {
-  const [open, setOpen] = useState(false);
   const thinking = message.status === 'streaming' && message.reasoningMs === undefined;
+  const [open, setOpen] = useState(thinking);
+  const [justDone, setJustDone] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (thinking && boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight;
   }, [message.reasoning, thinking]);
+  // 思考完毕（不再是 thinking）后延迟折叠折叠的既视感：先短暂保留打开态展示完整思考，
+  // 500ms 后自动收起。仅在本次从思考切换到完成的瞬间触发一次。
+  useEffect(() => {
+    if (!thinking && justDone && open) {
+      const t = window.setTimeout(() => setOpen(false), 500);
+      return () => window.clearTimeout(t);
+    }
+  }, [thinking, justDone, open]);
+  const fromThinking = useRef(thinking);
+  useEffect(() => {
+    if (fromThinking.current === true && thinking === false) setJustDone(true);
+    fromThinking.current = thinking;
+  }, [thinking]);
   const label = thinking
     ? '思考中…'
     : message.reasoningMs !== undefined ? `思考 ${(message.reasoningMs / 1000).toFixed(1)}s` : '思考过程';

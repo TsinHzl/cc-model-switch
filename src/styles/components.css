@@ -67,6 +67,8 @@
 /* ============ 顶部栏（设计稿 .header） ============ */
 .page {
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   width: min(1200px, 100%);
   margin: 0 auto;
   display: flex;

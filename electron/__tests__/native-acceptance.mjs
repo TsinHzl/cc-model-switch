@@ -163,9 +163,42 @@ async function main() {
     await wait(400);
     const chatPage = await cdp.evaluate(`!!document.querySelector('.chat-page')`);
     assert('点击对话页签出现对话页', tabClick === 'clicked' && chatPage === true, tabClick);
-    // 对话页空状态提示（隔离 home 无模型配置时会提示先去配置页添加）
+    // 对话页应自行读到隔离 home 已布置的配置（model-from-settings），
+    // 模型下拉不能显示「无可用模型」——这正是对话页首次接入时漏读配置的回归点。
+    await wait(600);
     const chatEmpty = await cdp.evaluate(`document.querySelector('.chat-empty')?.textContent ?? ''`);
-    assert('对话页空状态提示', chatEmpty.includes('模型切换'), chatEmpty || '无空状态');
+    const modelSelect = await cdp.evaluate(`(() => {
+      const opts = document.querySelectorAll('.composer-model select option');
+      return Array.from(opts).map(o => o.textContent).join('|');
+    })()`);
+    assert('对话页读到配置模型（非无可用模型）', chatEmpty.includes('选择模型后发送消息'), chatEmpty || '无空状态');
+    assert('模型下拉含配置条目', String(modelSelect).includes('model-from-settings'), String(modelSelect));
+    // 修复回归：optgroup 不能嵌套（Chromium 丢弃内层 option）。断言模型 option 直接挂在
+    // select 的 optgroup 下，且 optgroup 本身不是 select 的直接子节点中嵌套的。
+    const modelOptCount = await cdp.evaluate(`(() => {
+      const sel = document.querySelector('.composer-model select');
+      const opts = sel ? Array.from(sel.querySelectorAll(':scope > optgroup option')) : [];
+      return { count: opts.length, html: opts.map(o => o.value).join(',') };
+    })()`);
+    assert('模型 option 为 select 直接后代 optgroup 的子节点', modelOptCount && modelOptCount.count === 1 && modelOptCount.html === 'model-from-settings:https://s', JSON.stringify(modelOptCount));
+    // 滚动隔离：根容器不整页滚动，仅 .chat-messages 是对话滚动容器。
+    const scrollIsolation = await cdp.evaluate(`(() => {
+      const root = document.getElementById('root');
+      const chatPage = document.querySelector('.chat-page');
+      const messages = document.querySelector('.chat-messages');
+      const cs = (el) => el ? getComputedStyle(el).overflowY : '';
+      const isScrollable = (el) => el ? cs(el) === 'auto' || cs(el) === 'scroll' : false;
+      return {
+        body: cs(document.body),
+        root: cs(root),
+        chatPage: cs(chatPage),
+        messages: cs(messages),
+        messagesScrollTarget: isScrollable(messages),
+      };
+    })()`);
+    assert('根容器不整页滚动(overflow hidden)', scrollIsolation && scrollIsolation.root === 'hidden' && (scrollIsolation.body === 'visible' || scrollIsolation.body === 'hidden'), JSON.stringify(scrollIsolation));
+    // 仅 .chat-messages 是对话滚动容器；body / root / chat-page 都不是滚动目标。
+    assert('对话页滚动容器为 .chat-messages(overflow auto)', scrollIsolation && scrollIsolation.messagesScrollTarget && !(scrollIsolation.messages === 'hidden' || scrollIsolation.chatPage === 'auto' || scrollIsolation.chatPage === 'scroll' || scrollIsolation.root === 'auto' || scrollIsolation.root === 'scroll'), JSON.stringify(scrollIsolation));
 
     // —— 对话 IPC：额外字段 / 超限被拒（不发真实网络请求）——
     const chatStart = await cdp.evaluate(`window.desktop.chat.start({ model: 'x', base_url: 'https://example.invalid', messages: [{ role: 'user', content: 'hi' }], effort: 'off', webSearch: false, key: 'leak' })`);

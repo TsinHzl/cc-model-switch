@@ -45,10 +45,12 @@ body {
 }
 
 #root {
+  height: 100vh;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   padding: 36px 48px;
+  overflow: hidden;
 }
 
 * {

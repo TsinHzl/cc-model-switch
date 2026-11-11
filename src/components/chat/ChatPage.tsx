@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatStartRequest } from '../../lib/chatIpcContract';
 import type { ConfigEntry } from '../../lib/applyConfig';
-import type { ConfigState } from '../../lib/configStore';
+import type { LoadStatus } from '../../lib/configStore';
+import { loadConfigState } from '../../lib/configStore';
 import type { ChatConfig, ChatMessage } from '../../lib/chatTypes';
 import { normalizeEffort } from '../../lib/thinking';
 import { finalizeMessage, reduceChunk } from '../../lib/chatStream';
@@ -83,8 +84,10 @@ function codeText(code: string): string {
   }
 }
 
-export function ChatPage({ config }: { config: ConfigState | null }) {
-  const entries: ConfigEntry[] = config?.entries ?? [];
+export function ChatPage() {
+  // 配置状态自持，避免与配置页同时各调用一次 state 触发单在途 RATE_LIMITED。
+  const [configStatus, setConfigStatus] = useState<LoadStatus>({ kind: 'loading' });
+  const entries: ConfigEntry[] = configStatus.kind === 'ready' ? configStatus.state.entries : [];
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatConfig, setChatConfig] = useState<ChatConfig>(() => loadChatConfig(window.localStorage));
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
@@ -150,6 +153,20 @@ export function ChatPage({ config }: { config: ConfigState | null }) {
     }
     refreshSessions();
   }, [refreshSessions]);
+
+  // 加载最新配置列表：对话页独立请求，不依赖配置页的 hook 实例。
+  const reloadConfig = useCallback(async () => {
+    setConfigStatus(prev => (prev.kind === 'ready' ? prev : { kind: 'loading' }));
+    try {
+      setConfigStatus({ kind: 'ready', state: await loadConfigState() });
+    } catch {
+      setConfigStatus({ kind: 'error', message: '读取本机配置失败，请重试。', code: 'UNKNOWN_ERROR' });
+    }
+  }, []);
+
+  useEffect(() => {
+    void reloadConfig();
+  }, [reloadConfig]);
 
   const changeActive = useCallback((id: string) => {
     if (isGeneratingRef.current) return;
@@ -326,9 +343,13 @@ export function ChatPage({ config }: { config: ConfigState | null }) {
               <p>
                 {degraded
                   ? '会话未能持久化到本地存储，仅当前内存保留。'
-                  : entries.length === 0
-                    ? '配置列表为空，请先到「模型切换」添加模型。'
-                    : '选择模型后发送消息，可携带图片或文本附件。'}
+                  : configStatus.kind === 'loading'
+                    ? '正在读取模型配置…'
+                    : configStatus.kind === 'error'
+                      ? `读取配置失败：${configStatus.message}，请切到「模型切换」页确认。`
+                      : entries.length === 0
+                        ? '配置列表为空，请先到「模型切换」添加模型。'
+                        : '选择模型后发送消息，可携带图片或文本附件。'}
               </p>
             </div>
           ) : (

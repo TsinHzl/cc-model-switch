@@ -131,15 +131,39 @@
 .composer-pill {
   display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border);
   background: var(--card-bg); border-radius: 999px; padding: 5px 12px; font-size: 12px; color: var(--text); cursor: pointer;
+  white-space: nowrap; flex-shrink: 0;
 }
 .composer-pill.is-on { background: var(--accent-glow); border-color: var(--accent); }
 .composer-pill:disabled { opacity: 0.5; cursor: not-allowed; }
 .composer-pill select { border: none; background: transparent; color: var(--text); font-size: 12px; outline: none; cursor: pointer; }
-.composer-spacer { flex: 1; }
-.composer-model { max-width: 220px; }
+.composer-spacer { flex: 1; min-width: 8px; }
+/* 模型胶囊：内容不溢出到发送按钮下方，长模型名省略。 */
+.composer-model {
+  max-width: min(320px, 100%);
+  min-width: 0;
+  overflow: hidden;
+}
+.composer-model .composer-model-select {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composer-model-group {
+  flex-shrink: 0;
+  max-width: 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-glow);
+  color: var(--text);
+  font-size: 11px;
+}
 .composer-send {
   border: none; background: var(--accent); color: #fff; border-radius: 999px; padding: 6px 16px;
-  font-size: 13px; font-weight: 600; cursor: pointer;
+  font-size: 13px; font-weight: 600; cursor: pointer; flex-shrink: 0; white-space: nowrap;
 }
 .composer-send:hover { background: var(--accent-hover); }
 .composer-send:disabled { opacity: 0.5; cursor: not-allowed; }

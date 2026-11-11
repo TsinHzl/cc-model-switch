@@ -39,6 +39,40 @@ describe('Composer', () => {
     expect(html).toContain('停止');
     expect(html).not.toContain('class="composer-send"');
   });
+
+  it('模型下拉按 URL → 渠道分组，并标出当前模型所属分组', () => {
+    const html = render({
+      entries: [
+        { model: 'a-model', base_url: 'https://gw-a', key: 'k', channel: 'cat-a' },
+        { model: 'b-model', base_url: 'https://gw-a', key: 'k', channel: 'cat-b' },
+        { model: 'c-model', base_url: 'https://gw-b', key: 'k', channel: '' },
+      ],
+      model: 'b-model:https://gw-a',
+    });
+    // optgroup 扁平化：每个「URL › 渠道」组合一个 optgroup，模型 option 直接可选中。
+    expect(html).toContain('<optgroup label="https://gw-a › cat-a">');
+    expect(html).toContain('<optgroup label="https://gw-a › cat-b">');
+    expect(html).toContain('<optgroup label="https://gw-b › 默认渠道">');
+    expect(html).toContain('<option value="a-model:https://gw-a">a-model</option>');
+    expect(html).toContain('<option value="b-model:https://gw-a" selected="">b-model</option>');
+    expect(html).toContain('<option value="c-model:https://gw-b">c-model</option>');
+    // 当前模型属于 cat-b，胶囊上显示该渠道名
+    expect(html).toContain('class="composer-model-group"');
+    expect(html).toMatch(/composer-model-group[^>]*>cat-b</);
+  });
+
+  it('同名的两次请求分别落到正确分组', () => {
+    const html = render({
+      entries: [
+        { model: 'same', base_url: 'https://gw-a', key: 'k', channel: 'ch-a' },
+        { model: 'same', base_url: 'https://gw-b', key: 'k', channel: 'ch-b' },
+      ],
+      model: 'same:https://gw-b',
+    });
+    expect(html).toContain('value="same:https://gw-a"');
+    expect(html).toContain('value="same:https://gw-b"');
+    expect(html).toMatch(/composer-model-group[^>]*>ch-b</);
+  });
 });
 
 describe('MessageItem', () => {

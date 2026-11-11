@@ -1,15 +1,12 @@
 import { useState } from 'react';
 import ModelSwitch from './components/ModelSwitch';
 import { ChatPage } from './components/chat/ChatPage';
-import { useConfigState } from './lib/configStore';
 import './styles/chat.css';
 
 type Tab = 'config' | 'chat';
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('config');
-  const { status } = useConfigState();
-  const config = status.kind === 'ready' ? status.state : null;
 
   return (
     <div className="app-shell">
@@ -33,11 +30,7 @@ export default function App() {
           对话
         </button>
       </nav>
-      {tab === 'config' ? (
-        <ModelSwitch />
-      ) : (
-        <ChatPage config={config} />
-      )}
+      {tab === 'config' ? <ModelSwitch /> : <ChatPage />}
     </div>
   );
 }

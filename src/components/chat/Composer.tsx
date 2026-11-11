@@ -1,9 +1,10 @@
 /* 对话输入区：附件选择与预览、思考力度 / 联网搜索 / 模型选择、发送与停止。 */
-import { useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import { useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { effortOptionsFor, normalizeEffort } from '../../lib/thinking';
 import type { ChatEffort } from '../../lib/chatIpcContract';
 import type { ChatMessage } from '../../lib/chatTypes';
 import type { ConfigEntry } from '../../lib/applyConfig';
+import { groupConfigs } from '../../lib/configModel';
 import { AttachmentError, MAX_ATTACHMENTS, MAX_TEXT_BYTES, processFile, formatFileSize } from '../../lib/attachments';
 import { AttachmentView } from './AttachmentView';
 
@@ -50,6 +51,18 @@ export function Composer({
   const canSend = (text.trim() !== '' || attachments.length > 0)
     && processing === 0 && model !== '' && !isGenerating;
   const attachFull = attachments.length + processing >= MAX_ATTACHMENTS;
+
+  // 与配置页同一分组算法：URL → 渠道，保留 JSON 出现顺序。
+  const modelGroups = useMemo(() => groupConfigs([...entries]), [entries]);
+  const currentGroup = useMemo(() => {
+    for (const group of modelGroups) {
+      for (const channel of group.channels) {
+        const hit = channel.items.some(({ entry }) => `${entry.model}:${entry.base_url}` === model);
+        if (hit) return { channel: channel.channel, url: group.url };
+      }
+    }
+    return null;
+  }, [modelGroups, model]);
 
   const setEffort = (value: ChatEffort) => onEffortChange(normalizeEffort(model, value));
 
@@ -149,18 +162,40 @@ export function Composer({
           联网搜索
         </button>
         <div className="composer-spacer" />
-        <label className="composer-pill composer-model">
-          模型
+        <label className="composer-pill composer-model" title="选择模型">
+          {currentGroup && (
+            <span
+              className="composer-model-group"
+              title={`${currentGroup.channel} · ${currentGroup.url}`}
+            >
+              {currentGroup.channel}
+            </span>
+          )}
           <select
+            className="composer-model-select"
             value={model}
             onChange={e => onModelChange(e.target.value)}
             disabled={isGenerating || entries.length === 0}
           >
             {entries.length === 0 && <option value="">无可用模型</option>}
-            {entries.map(e => (
-              <option key={`${e.model}:${e.base_url}`} value={`${e.model}:${e.base_url}`}>
-                {e.model}
-              </option>
+            {/* optgroup 不能嵌套（Chromium 会丢弃内层）；每个「URL › 渠道」组合摊平为一个 optgroup。 */}
+            {modelGroups.flatMap(group =>
+              group.channels.map(channel => ({
+                key: `${group.url}::${channel.channel}`,
+                label: `${group.url} › ${channel.channel}`,
+                items: channel.items,
+              })),
+            ).map(g => (
+              <optgroup key={g.key} label={g.label}>
+                {g.items.map(({ entry, index }) => (
+                  <option
+                    key={`${index}:${entry.model}:${entry.base_url}`}
+                    value={`${entry.model}:${entry.base_url}`}
+                  >
+                    {entry.model}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </label>

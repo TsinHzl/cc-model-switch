@@ -1,5 +1,5 @@
 /* 对话页：组合侧栏、消息列表与输入区，承担会话状态、流式拼装与本地存储。 */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ChatStartRequest } from '../../lib/chatIpcContract';
 import type { ConfigEntry } from '../../lib/applyConfig';
 import type { LoadStatus } from '../../lib/configStore';
@@ -107,9 +107,32 @@ export function ChatPage() {
   const isGeneratingRef = useRef(isGenerating);
   isGeneratingRef.current = isGenerating;
   const createdAtRef = useRef<number | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  // 是否贴底跟随：用户主动上滑阅读历史时暂停，滑回距底 48px 内再恢复。
+  const stickRef = useRef(true);
+  const followedSessionRef = useRef<string | null>(null);
 
   const modelKey = chatConfig.model;
   const currentEntry = entries.find(e => `${e.model}:${e.base_url}` === modelKey) ?? null;
+
+  // 用户上滑查看历史时暂停跟随，滑回距底 48px 内恢复。
+  const onMessagesScroll = useCallback(() => {
+    const el = listRef.current;
+    if (!el) return;
+    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 48;
+  }, []);
+
+  // 流式输出每条 chunk 都会更新 messages；绘制前贴底，避免出现“停在旧位置”。
+  // 切换会话首帧强制贴底，之后仅在想跟随时跟随。
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    if (followedSessionRef.current !== sessionId) {
+      followedSessionRef.current = sessionId;
+      stickRef.current = true;
+    }
+    if (stickRef.current) el.scrollTop = el.scrollHeight;
+  }, [messages, sessionId]);
 
   // 持久化选择与活动会话
   useEffect(() => { saveChatConfig(window.localStorage, chatConfig); }, [chatConfig]);
@@ -174,6 +197,7 @@ export function ChatPage() {
     setMessages(normalizeMessages(msgs));
     setSessionId(id);
     setActiveId(id);
+    stickRef.current = true;
     const created = readCreatedAtId(id);
     createdAtRef.current = created;
   }, []);
@@ -183,6 +207,7 @@ export function ChatPage() {
     setMessages([]);
     setSessionId(null);
     setActiveId(null);
+    stickRef.current = true;
     createdAtRef.current = null;
   }, []);
 
@@ -193,6 +218,7 @@ export function ChatPage() {
       setMessages([]);
       setSessionId(null);
       setActiveId(null);
+      stickRef.current = true;
     }
   }, [refreshSessions]);
 
@@ -201,6 +227,7 @@ export function ChatPage() {
     setMessages([]);
     setSessionId(null);
     setActiveId(null);
+    stickRef.current = true;
     refreshSessions();
   }, [refreshSessions]);
 
@@ -223,6 +250,7 @@ export function ChatPage() {
 
   const send = useCallback((text: string, attachments: AttachmentLike[]) => {
     if (!currentEntry || isGeneratingRef.current) return;
+    stickRef.current = true;
     const user: ChatMessage = {
       id: newId(), role: 'user', content: text, status: 'done',
       ...(attachments.length > 0 ? { attachments: attachments as ChatMessage['attachments'] } : {}),
@@ -336,7 +364,7 @@ export function ChatPage() {
         onClearAll={wipeAll}
       />
       <div className="chat-main">
-        <div className="chat-messages">
+        <div className="chat-messages" ref={listRef} onScroll={onMessagesScroll}>
           {messages.length === 0 ? (
             <div className="chat-empty">
               <h2>开始对话</h2>

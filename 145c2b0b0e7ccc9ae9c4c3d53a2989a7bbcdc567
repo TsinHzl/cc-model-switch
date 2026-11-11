@@ -1,0 +1,39 @@
+src/styles/components.css
+  98c4f36a379c1547 70-71
+src/styles/chat.css
+  98c4f36a379c1547 134,139-150,152-163,166
+src/components/chat/ChatPage.tsx
+  98c4f36a379c1547 5-6,87-90,157-170,346-352
+electron/__tests__/native-acceptance.mjs
+  98c4f36a379c1547 166-168,170-201
+src/styles/theme.css
+  98c4f36a379c1547 48,53
+src/App.tsx
+  98c4f36a379c1547 33
+src/components/__tests__/chatComponents.test.tsx
+  98c4f36a379c1547 42-75
+src/components/chat/Composer.tsx
+  98c4f36a379c1547 2,7,55-66,165-173,175,181-198
+src/components/chat/MessageList.tsx
+  98c4f36a379c1547 13-14,19-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "145c2b0b0e7ccc9ae9c4c3d53a2989a7bbcdc567",
+  "prompts": {
+    "98c4f36a379c1547": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6af1456f-b119-4f36-a785-9aa212f8a96f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 214,
+      "total_deletions": 56,
+      "accepted_lines": 185,
+      "overriden_lines": 0
+    }
+  }
+}

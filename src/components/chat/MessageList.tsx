@@ -118,6 +118,13 @@ export function MessageItem({
           </div>
         )}
         {message.content !== '' && <div className="chat-bubble">{message.content}</div>}
+        {message.content !== '' && (
+          <div className="chat-actions">
+            <button type="button" className="chat-action" onClick={() => void copy()}>
+              {copied ? '已复制' : '复制'}
+            </button>
+          </div>
+        )}
       </div>
     );
   }

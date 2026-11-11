@@ -96,6 +96,25 @@ describe('MessageItem', () => {
     expect(html).toContain('复制');
     expect(html).toContain('重生成');
   });
+
+  it('用户消息展示复制按钮', () => {
+    const html = renderToStaticMarkup(createElement(MessageItem, {
+      message: { id: 'u', role: 'user', content: '你好', status: 'done' },
+      canRegenerate: false,
+      onRegenerate: noop,
+    }));
+    expect(html).toContain('class="chat-actions"');
+    expect(html).toContain('>复制</button>');
+  });
+
+  it('用户空消息不展示复制按钮', () => {
+    const html = renderToStaticMarkup(createElement(MessageItem, {
+      message: { id: 'u', role: 'user', content: '', status: 'done' },
+      canRegenerate: false,
+      onRegenerate: noop,
+    }));
+    expect(html).not.toContain('复制');
+  });
 });
 
 describe('SessionsSidebar', () => {

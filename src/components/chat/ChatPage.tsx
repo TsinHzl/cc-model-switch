@@ -8,7 +8,7 @@ import type { ChatConfig, ChatMessage } from '../../lib/chatTypes';
 import { normalizeEffort } from '../../lib/thinking';
 import { finalizeMessage, reduceChunk } from '../../lib/chatStream';
 import {
-  clearSessions, deleteSession, listSessions, loadChatConfig, loadSession,
+  clearSessions, deleteSession, listSessions, loadChatConfig, loadSession, loadSessionModel,
   saveActiveId, saveChatConfig, saveSession, type SessionMeta,
 } from '../../lib/chatStore';
 import { deriveTitle, normalizeMessages } from '../../lib/chatHistory';
@@ -151,6 +151,7 @@ export function ChatPage() {
       id: sessionIdRef.current,
       title: deriveTitle(msgs),
       createdAt,
+      model: chatConfigRef.current.model,
       messages: msgs,
     });
     setDegraded(saved.degraded);
@@ -181,6 +182,8 @@ export function ChatPage() {
           setSessionId(id);
           setActiveId(id);
           createdAtRef.current = readCreatedAtId(id);
+          const storedModel = loadSessionModel(window.localStorage, id);
+          if (storedModel) setChatConfig(prev => ({ ...prev, model: storedModel }));
         }
       }
     }
@@ -210,6 +213,9 @@ export function ChatPage() {
     stickRef.current = true;
     const created = readCreatedAtId(id);
     createdAtRef.current = created;
+    // 恢复会话各自使用的模型；旧会话无记录时保留当前选择。
+    const storedModel = loadSessionModel(window.localStorage, id);
+    if (storedModel) setChatConfig(prev => ({ ...prev, model: storedModel }));
   }, []);
 
   const startNew = useCallback(() => {

@@ -7,6 +7,7 @@ import {
   loadActiveId,
   loadChatConfig,
   loadSession,
+  loadSessionModel,
   saveActiveId,
   saveChatConfig,
   saveSession,
@@ -53,6 +54,7 @@ describe('chatStore', () => {
       id: null,
       title: '标题',
       createdAt: 100,
+      model: 'm1:https://gw',
       messages: [message('user', 'hello'), message('assistant', 'hi')],
     };
     const saved = saveSession(storage, input);
@@ -68,7 +70,7 @@ describe('chatStore', () => {
   it('保存时剥离附件 data，仅保留展示占位', () => {
     const storage = memoryStorage();
     const saved = saveSession(storage, {
-      id: null, title: 't', createdAt: 0,
+      id: null, title: 't', createdAt: 0, model: '',
       messages: [message('user', 'q', true), message('assistant', 'a')],
     });
     const restored = loadSession(storage, saved.id);
@@ -81,8 +83,8 @@ describe('chatStore', () => {
 
   it('覆盖既有会话保留同一 id 且替换消息', () => {
     const storage = memoryStorage();
-    const a = saveSession(storage, { id: null, title: 'a', createdAt: 0, messages: [message('user', '1')] });
-    const b = saveSession(storage, { id: a.id, title: 'b', createdAt: 0, messages: [message('user', '2')] });
+    const a = saveSession(storage, { id: null, title: 'a', createdAt: 0, model: '', messages: [message('user', '1')] });
+    const b = saveSession(storage, { id: a.id, title: 'b', createdAt: 0, model: '', messages: [message('user', '2')] });
     expect(b.id).toBe(a.id);
     expect(listSessions(storage).sessions).toHaveLength(1);
     expect(loadSession(storage, a.id).map(m => m.content)).toEqual(['2']);
@@ -90,8 +92,8 @@ describe('chatStore', () => {
 
   it('删除会话更新索引并清理内容与活动指向', () => {
     const storage = memoryStorage();
-    const a = saveSession(storage, { id: null, title: 'a', createdAt: 0, messages: [message('user', '1')] });
-    const b = saveSession(storage, { id: null, title: 'b', createdAt: 0, messages: [message('user', '2')] });
+    const a = saveSession(storage, { id: null, title: 'a', createdAt: 0, model: '', messages: [message('user', '1')] });
+    const b = saveSession(storage, { id: null, title: 'b', createdAt: 0, model: '', messages: [message('user', '2')] });
     saveActiveId(storage, a.id);
     deleteSession(storage, a.id);
     expect(listSessions(storage).sessions.map(s => s.id)).toEqual([b.id]);
@@ -101,8 +103,8 @@ describe('chatStore', () => {
 
   it('清空全部会话移除索引、内容与活动指向', () => {
     const storage = memoryStorage();
-    const a = saveSession(storage, { id: null, title: 'a', createdAt: 0, messages: [message('user', '1')] });
-    const b = saveSession(storage, { id: null, title: 'b', createdAt: 0, messages: [message('user', '2')] });
+    const a = saveSession(storage, { id: null, title: 'a', createdAt: 0, model: '', messages: [message('user', '1')] });
+    const b = saveSession(storage, { id: null, title: 'b', createdAt: 0, model: '', messages: [message('user', '2')] });
     saveActiveId(storage, a.id);
     clearSessions(storage);
     expect(listSessions(storage).sessions).toEqual([]);
@@ -121,7 +123,7 @@ describe('chatStore', () => {
   it('写入失败降级为内存并标记 degraded，不抛异常', () => {
     const storage = memoryStorage(true);
     const saved = saveSession(storage, {
-      id: null, title: 't', createdAt: 0, messages: [message('user', 'q')],
+      id: null, title: 't', createdAt: 0, model: '', messages: [message('user', 'q')],
     });
     expect(saved.degraded).toBe(true);
     expect(listSessions(storage).sessions).toEqual([]);
@@ -132,5 +134,46 @@ describe('chatStore', () => {
     const storage = memoryStorage();
     storage.setItem('ccms.chat.v1.sessions', '{broken');
     expect(listSessions(storage)).toEqual({ degraded: false, sessions: [] });
+  });
+
+  it('会话模型随会话保存并可单独读取', () => {
+    const storage = memoryStorage();
+    const saved = saveSession(storage, {
+      id: null, title: 't', createdAt: 0,
+      model: 'deepseek-flash:https://gw',
+      messages: [message('user', 'q')],
+    });
+    expect(loadSessionModel(storage, saved.id)).toBe('deepseek-flash:https://gw');
+  });
+
+  it('覆盖会话时更新其模型', () => {
+    const storage = memoryStorage();
+    const a = saveSession(storage, {
+      id: null, title: 'a', createdAt: 0,
+      model: 'deepseek-flash:https://gw',
+      messages: [message('user', '1')],
+    });
+    saveSession(storage, {
+      id: a.id, title: 'a', createdAt: 0,
+      model: 'glm-5.3-flash:https://gw',
+      messages: [message('user', '2')],
+    });
+    expect(loadSessionModel(storage, a.id)).toBe('glm-5.3-flash:https://gw');
+  });
+
+  it('旧版会话无模型字段时读取为 null（回退全局配置）', () => {
+    const storage = memoryStorage();
+    storage.setItem('ccms.chat.v1.session:legacy', JSON.stringify({
+      id: 'legacy', title: 't', createdAt: 0, updatedAt: 0,
+      messages: [message('user', 'q')],
+    }));
+    expect(loadSessionModel(storage, 'legacy')).toBeNull();
+  });
+
+  it('缺失 / 损坏的会话模型读取为 null', () => {
+    const storage = memoryStorage();
+    expect(loadSessionModel(storage, 'missing')).toBeNull();
+    storage.setItem('ccms.chat.v1.session:bad', '{broken');
+    expect(loadSessionModel(storage, 'bad')).toBeNull();
   });
 });

@@ -18,6 +18,8 @@ export interface ChatSession {
   title: string;
   createdAt: number;
   updatedAt: number;
+  /** 会话使用的模型（`model:base_url`）。旧版本地会话无此字段时为 undefined。 */
+  model?: string;
   messages: ChatMessage[];
 }
 
@@ -95,6 +97,7 @@ export interface SaveSessionInput {
   id: string | null;
   title: string;
   createdAt: number;
+  model: string;
   messages: ChatMessage[];
 }
 
@@ -120,6 +123,7 @@ export function saveSession(storage: CountedStorage, input: SaveSessionInput): S
     title: input.title,
     createdAt: input.createdAt,
     updatedAt: now,
+    model: input.model,
     messages: input.messages.map(stripMessage),
   };
   let contentOk = false;
@@ -147,6 +151,24 @@ export function loadSession(storage: CountedStorage, id: string): ChatMessage[] 
     return Array.isArray(messages) ? (messages as ChatMessage[]) : [];
   } catch {
     return [];
+  }
+}
+
+/** 读取某个会话的模型（`model:base_url`）；缺失 / 损坏返回 null。 */
+export function loadSessionModel(storage: CountedStorage, id: string): string | null {
+  let raw: string | null = null;
+  try {
+    raw = storage.getItem(`${PREFIX}session:${id}`);
+  } catch {
+    return null;
+  }
+  if (raw === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const model = (parsed as { model?: unknown }).model;
+    return typeof model === 'string' && model !== '' ? model : null;
+  } catch {
+    return null;
   }
 }
 

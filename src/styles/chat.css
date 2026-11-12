@@ -151,6 +151,9 @@
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* 原生 select 按最长 option 定宽，会把胶囊撑到 max-width 并留出大片空白；
+     按显示内容排版，让椭圆紧贴当前模型名。 */
+  field-sizing: content;
 }
 .composer-model-group {
   flex-shrink: 0;

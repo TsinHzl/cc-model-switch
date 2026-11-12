@@ -1,0 +1,27 @@
+src/components/chat/ConfirmClearAll.tsx
+  98c4f36a379c1547 1-28
+src/components/__tests__/chatComponents.test.tsx
+  98c4f36a379c1547 6,121-133
+src/components/chat/ChatPage.tsx
+  98c4f36a379c1547 16,99,236,375,418-424
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "9eb59430e0c6df82d1e9eabd0f0a72cd4ee903ed",
+  "prompts": {
+    "98c4f36a379c1547": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6af1456f-b119-4f36-a785-9aa212f8a96f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 53,
+      "total_deletions": 1,
+      "accepted_lines": 53,
+      "overriden_lines": 0
+    }
+  }
+}

@@ -3,6 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { Composer } from '../chat/Composer';
+import { ConfirmClearAll } from '../chat/ConfirmClearAll';
 import { MessageItem } from '../chat/MessageList';
 import { SessionsSidebar } from '../chat/SessionsSidebar';
 import type { ChatMessage } from '../../lib/chatTypes';
@@ -114,6 +115,19 @@ describe('MessageItem', () => {
       onRegenerate: noop,
     }));
     expect(html).not.toContain('复制');
+  });
+});
+
+describe('ConfirmClearAll', () => {
+  it('展示会话数量与不可撤销提示', () => {
+    const html = renderToStaticMarkup(createElement(ConfirmClearAll, {
+      count: 3, onCancel: noop, onConfirm: noop,
+    }));
+    expect(html).toContain('清空全部历史');
+    expect(html).toContain('3 个会话');
+    expect(html).toContain('不可撤销');
+    expect(html).toContain('确认清空');
+    expect(html).toContain('取消');
   });
 });
 

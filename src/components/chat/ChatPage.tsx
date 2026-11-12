@@ -13,6 +13,7 @@ import {
 } from '../../lib/chatStore';
 import { deriveTitle, normalizeMessages } from '../../lib/chatHistory';
 import { Composer } from './Composer';
+import { ConfirmClearAll } from './ConfirmClearAll';
 import { MessageItem } from './MessageList';
 import { SessionsSidebar } from './SessionsSidebar';
 
@@ -95,6 +96,7 @@ export function ChatPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [degraded, setDegraded] = useState(false);
+  const [confirmingClear, setConfirmingClear] = useState(false);
 
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -231,6 +233,7 @@ export function ChatPage() {
   }, [refreshSessions]);
 
   const wipeAll = useCallback(() => {
+    setConfirmingClear(false);
     clearSessions(window.localStorage);
     setMessages([]);
     setSessionId(null);
@@ -369,7 +372,7 @@ export function ChatPage() {
         onNew={startNew}
         onSelect={changeActive}
         onDelete={removeSession}
-        onClearAll={wipeAll}
+        onClearAll={() => setConfirmingClear(true)}
       />
       <div className="chat-main">
         <div className="chat-messages" ref={listRef} onScroll={onMessagesScroll}>
@@ -412,6 +415,13 @@ export function ChatPage() {
           onStop={stop}
         />
       </div>
+      {confirmingClear && (
+        <ConfirmClearAll
+          count={sessions.length}
+          onCancel={() => setConfirmingClear(false)}
+          onConfirm={wipeAll}
+        />
+      )}
     </div>
   );
 }

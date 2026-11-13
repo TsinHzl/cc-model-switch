@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createSseDecoder, createSseState, dispatchSseData, toChunks } from '../sse';
+import {
+  clientToolUses, createSseDecoder, createSseState, dispatchSseData, toChunks, toolQuery,
+} from '../sse';
 
 const frame = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
 
@@ -109,6 +111,46 @@ describe('SSE 事件分派', () => {
   it('上游 error 事件转成错误事件', () => {
     expect(dispatchSseData(JSON.stringify({ type: 'error', error: { message: 'boom' } }), createSseState()))
       .toEqual([{ kind: 'error', message: 'boom' }]);
+  });
+
+  it('记录客户端 tool_use 块与 stop_reason，供网关不执行搜索时回填', () => {
+    const state = createSseState();
+    expect(dispatchSseData(JSON.stringify({
+      type: 'content_block_start', index: 2,
+      content_block: { type: 'tool_use', name: 'web_search', id: 'call_1', input: {} },
+    }), state)).toEqual([]);
+    dispatchSseData(JSON.stringify({
+      type: 'content_block_delta', index: 2,
+      delta: { type: 'input_json_delta', partial_json: '{"PARAMETER_NAME":"天气"}' },
+    }), state);
+    dispatchSseData(JSON.stringify({
+      type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: {},
+    }), state);
+
+    expect(state.stopReason).toBe('tool_use');
+    const tools = clientToolUses(state);
+    expect(tools).toEqual([{
+      id: 'call_1', name: 'web_search', input: { PARAMETER_NAME: '天气' },
+    }]);
+    expect(toolQuery(tools[0]!.input)).toBe('天气');
+  });
+
+  it('tool_use 入参非法时回填为 null，不抛错', () => {
+    const state = createSseState();
+    dispatchSseData(JSON.stringify({
+      type: 'content_block_start', index: 0,
+      content_block: { type: 'tool_use', name: 'web_search', id: 'c' },
+    }), state);
+    dispatchSseData(JSON.stringify({
+      type: 'content_block_delta', index: 0,
+      delta: { type: 'input_json_delta', partial_json: '{oops' },
+    }), state);
+    expect(clientToolUses(state)[0]!.input).toBeNull();
+    expect(toolQuery(null)).toBe('');
+  });
+
+  it('工具入参缺少已知搜索字段时返回空查询词', () => {
+    expect(toolQuery({ other: 'x' })).toBe('');
   });
 
   it('忽略未知事件与畸形负载', () => {

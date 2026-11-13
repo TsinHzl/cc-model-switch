@@ -297,4 +297,142 @@ describe('对话 handler 边界', () => {
     expect(body.output_config).toEqual({ effort: 'medium' });
     expect((init.headers as Record<string, string>)['x-web-search-mode']).toBe('model');
   });
+
+  it('网关把搜索当作客户端 tool_use 时回填 tool_result 并拿到正文', async () => {
+    // 复现 taotoken 类网关：本轮只返回 tool_use、stop_reason=tool_use，没有正文。
+    const toolUseFrames = [
+      `data: ${JSON.stringify({
+        type: 'content_block_start', index: 1,
+        content_block: { type: 'tool_use', name: 'web_search', id: 'call_1', input: {} },
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        type: 'content_block_delta', index: 1,
+        delta: { type: 'input_json_delta', partial_json: '{"query":"天气"}' },
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 },
+      })}\n\n`,
+    ];
+    fetchMock
+      .mockResolvedValueOnce(sseResponse(toolUseFrames))
+      .mockResolvedValueOnce(sseResponse(textFrames('真正答案')));
+
+    const handlers = build();
+    await handlers.start(source.event, request({ webSearch: true }));
+    await vi.waitFor(() => expect(sent.at(-1)?.kind).toBe('done'));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, second] = fetchMock.mock.calls[1]! as [URL, RequestInit];
+    // 回填轮不再联网：既不带 tools / thinking，也不带联网模式头。
+    expect((second.headers as Record<string, string>)['x-web-search-mode']).toBeUndefined();
+    const body = JSON.parse(String(second.body)) as {
+      messages: { role: string; content: unknown }[]; tools?: unknown; thinking?: unknown;
+    };
+    expect(body.tools).toBeUndefined();
+    expect(body.thinking).toBeUndefined();
+    expect(body.messages.at(-2)?.content).toEqual([
+      { type: 'tool_use', id: 'call_1', name: 'web_search', input: { query: '天气' } },
+    ]);
+    expect(body.messages.at(-1)?.content).toEqual([{
+      type: 'tool_result', tool_use_id: 'call_1', is_error: true,
+      content: '联网搜索在本网关不可用，请基于已有知识直接回答，不要再调用搜索工具。',
+    }]);
+
+    const texts = sent.filter(chunk => chunk.kind === 'text')
+      .map(chunk => (chunk as { delta: string }).delta);
+    expect(texts.join('')).toBe('真正答案');
+    expect(sent.some(chunk => chunk.kind === 'search_call')).toBe(true);
+  });
+
+  it('回填后仍无正文时给出明确错误，不留下空回复', async () => {
+    const toolUseFrames = [
+      `data: ${JSON.stringify({
+        type: 'content_block_start', index: 1,
+        content_block: { type: 'tool_use', name: 'web_search', id: 'call_2', input: {} },
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: {},
+      })}\n\n`,
+    ];
+    fetchMock
+      .mockResolvedValueOnce(sseResponse(toolUseFrames))
+      .mockResolvedValueOnce(sseResponse([`data: ${JSON.stringify({
+        type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '\n\n' },
+      })}\n\n`]));
+
+    const handlers = build();
+    await handlers.start(source.event, request({ webSearch: true }));
+    await vi.waitFor(() => expect(sent.some(chunk => chunk.kind === 'error')).toBe(true));
+    const error = sent.find(chunk => chunk.kind === 'error') as { message: string };
+    expect(error.message).toContain('联网搜索');
+    expect(sent.some(chunk => chunk.kind === 'text' && chunk.delta.trim() !== '')).toBe(false);
+  });
+
+  it('未开启联网搜索时不做回填，空正文直接报错', async () => {
+    fetchMock.mockResolvedValue(sseResponse([]));
+    const handlers = build();
+    await handlers.start(source.event, request());
+    await vi.waitFor(() => expect(sent.some(chunk => chunk.kind === 'error')).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const error = sent.find(chunk => chunk.kind === 'error') as { message: string };
+    expect(error.message).toContain('未返回任何正文');
+  });
+
+  it('首轮已有正文时即使收尾为 tool_use 也不再回填', async () => {
+    fetchMock.mockResolvedValue(sseResponse([
+      `data: ${JSON.stringify({
+        type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '已有答案' },
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        type: 'content_block_start', index: 1,
+        content_block: { type: 'tool_use', name: 'web_search', id: 'call_3', input: {} },
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: {},
+      })}\n\n`,
+    ]));
+    const handlers = build();
+    await handlers.start(source.event, request({ webSearch: true }));
+    await vi.waitFor(() => expect(sent.at(-1)?.kind).toBe('done'));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('回填轮仍返回 tool_use 时最多重试到上限后报错', async () => {
+    // 每轮必须是新的 Response：Response body 只能读一次，复用会让第二轮变成读取异常。
+    fetchMock.mockImplementation(async () => sseResponse([
+      `data: ${JSON.stringify({
+        type: 'content_block_start', index: 1,
+        content_block: { type: 'tool_use', name: 'web_search', id: 'call_4', input: {} },
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: {},
+      })}\n\n`,
+    ]));
+    const handlers = build();
+    await handlers.start(source.event, request({ webSearch: true }));
+    await vi.waitFor(() => expect(sent.some(chunk => chunk.kind === 'error')).toBe(true));
+    // 首轮 + 最多 2 轮回填，之后不再发起请求。
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const error = sent.find(chunk => chunk.kind === 'error') as { message: string };
+    expect(error.message).toContain('联网搜索');
+  });
+
+  it('非搜索的客户端工具不触发回填，只报空正文', async () => {
+    fetchMock.mockResolvedValue(sseResponse([
+      `data: ${JSON.stringify({
+        type: 'content_block_start', index: 1,
+        content_block: { type: 'tool_use', name: 'run_command', id: 'call_5', input: {} },
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: {},
+      })}\n\n`,
+    ]));
+    const handlers = build();
+    await handlers.start(source.event, request({ webSearch: true }));
+    await vi.waitFor(() => expect(sent.some(chunk => chunk.kind === 'error')).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sent.some(chunk => chunk.kind === 'search_call')).toBe(false);
+    const error = sent.find(chunk => chunk.kind === 'error') as { message: string };
+    expect(error.message).toContain('未返回任何正文');
+  });
 });

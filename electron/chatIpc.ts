@@ -5,7 +5,10 @@ import {
   chatCancelRequestSchema, chatStartRequestSchema,
   type ChatChunk, type ChatErrorCode, type ChatStartRequest,
 } from '../src/lib/chatIpcContract';
-import { createSseDecoder, createSseState, toChunks } from '../src/lib/sse';
+import {
+  clientToolUses, createSseDecoder, createSseState, toChunks, toolQuery,
+  type ClientToolUse, type SseState,
+} from '../src/lib/sse';
 import { thinkingRequestFields } from '../src/lib/thinking';
 import type { FileStore } from '../server/files.js';
 import { isTrusted, type GetTrustedWindow } from './ipcSource';
@@ -14,6 +17,12 @@ const MAX_OUTPUT_TOKENS = 16384;
 const WEB_SEARCH_MAX_USES = 5;
 const CHUNK_CHANNEL = 'chat:chunk';
 const TRUNCATED_MESSAGE = '回复流意外结束，内容可能不完整；请重试。';
+/** 网关不支持服务端搜索时，自动回填的 tool_result 内容。 */
+const SEARCH_UNAVAILABLE = '联网搜索在本网关不可用，请基于已有知识直接回答，不要再调用搜索工具。';
+/** 网关把搜索当客户端 tool_use 时最多回填的轮数，防止反复触发造成无限请求。 */
+const MAX_TOOL_ROUNDS = 2;
+const TOOL_UNSUPPORTED_MESSAGE = '该网关不执行联网搜索，且未能生成正文；请关闭联网搜索后重试。';
+const EMPTY_ANSWER_MESSAGE = '模型网关未返回任何正文内容；请重试或更换模型。';
 
 export interface ChatHandlerOptions {
   readonly store: FileStore;
@@ -96,13 +105,70 @@ export function createChatHandlers(options: ChatHandlerOptions) {
   async function run(
     id: string, entry: ConfigTriple, request: ChatStartRequest, controller: AbortController,
   ): Promise<void> {
+    let answered = false;
     const push = (events: Parameters<typeof toChunks>[1]) => {
+      for (const event of events) {
+        if (event.kind === 'text' && event.delta.trim() !== '') answered = true;
+      }
       for (const chunk of toChunks(id, events)) {
         if (!emit(chunk)) controller.abort();
       }
     };
     let finished = false;
     try {
+      const url = new URL(entry.base_url);
+      const endpoint = new URL(`${url.pathname.replace(/\/+$/, '')}/v1/messages`, url);
+      const baseHeaders: Record<string, string> = {
+        'content-type': 'application/json',
+        'x-api-key': entry.key,
+        'anthropic-version': '2023-06-01',
+      };
+      // 回填轮明确不再联网，带该头会与「已拒绝搜索」的语义冲突。
+      const searchHeaders = request.webSearch
+        ? { ...baseHeaders, 'x-web-search-mode': 'model' } : baseHeaders;
+
+      /** 执行单轮请求并回放事件；出错时返回 null（错误事件已推送）。 */
+      const requestRound = async (
+        body: Record<string, unknown>, headers: Record<string, string>,
+      ): Promise<SseState | null> => {
+        const response = await fetchImpl(endpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+          redirect: 'error',
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          const detail = await response.text().catch(() => '');
+          push([{
+            kind: 'error',
+            message: detail.trim() === ''
+              ? `模型网关返回错误 (HTTP ${response.status})`
+              : `${detail.trim().slice(0, 300)} (HTTP ${response.status})`,
+          }]);
+          return null;
+        }
+        if (!response.body) {
+          push([{ kind: 'error', message: '模型网关返回了空响应。' }]);
+          return null;
+        }
+        const state = createSseState();
+        const decoder = createSseDecoder(state);
+        const textDecoder = new TextDecoder();
+        const reader = response.body.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          push(decoder.push(textDecoder.decode(value, { stream: true })));
+        }
+        push(decoder.end());
+        if (!state.messageStopped) {
+          push([{ kind: 'error', message: TRUNCATED_MESSAGE }]);
+          return null;
+        }
+        return state;
+      };
+
       const body: Record<string, unknown> = {
         model: entry.model,
         max_tokens: MAX_OUTPUT_TOKENS,
@@ -110,56 +176,69 @@ export function createChatHandlers(options: ChatHandlerOptions) {
         messages: request.messages,
         ...thinkingRequestFields(entry.model, request.effort),
       };
-      const headers: Record<string, string> = {
-        'content-type': 'application/json',
-        'x-api-key': entry.key,
-        'anthropic-version': '2023-06-01',
-      };
       if (request.webSearch) {
         body.tools = [{
           type: 'web_search_20250305', name: 'web_search', max_uses: WEB_SEARCH_MAX_USES,
         }];
-        headers['x-web-search-mode'] = 'model';
       }
-      const url = new URL(entry.base_url);
-      const endpoint = new URL(`${url.pathname.replace(/\/+$/, '')}/v1/messages`, url);
 
-      const response = await fetchImpl(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        redirect: 'error',
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        const detail = await response.text().catch(() => '');
+      // 部分网关不执行服务端搜索，而是把搜索意图作为普通 tool_use 返回并结束本轮，
+      // 该轮没有正文；个别网关回填一次后仍重复同一行为。最多回填 MAX_TOOL_ROUNDS 轮，
+      // 每轮都不带 tools / thinking，让模型改用已有知识作答。
+      let messages: unknown[] = [...request.messages];
+      let sawToolUse = false;
+      let state = await requestRound(body, searchHeaders);
+      for (let round = 0; state; round += 1) {
+        // 只回填搜索工具：其它客户端工具不属于本功能的处理范围，否则会给出错误的工具结果。
+        const toolUses: ClientToolUse[] = clientToolUses(state)
+          .filter(tool => tool.name.includes('web_search'));
+        if (toolUses.length > 0) sawToolUse = true;
+        const blocked = request.webSearch && !answered && state.stopReason === 'tool_use'
+          && toolUses.length > 0;
+        // 已产出正文、未开启联网或本轮正常结束时都无需再回填，避免多计一次请求。
+        if (!blocked || round >= MAX_TOOL_ROUNDS) break;
+        for (const tool of toolUses) {
+          push([
+            { kind: 'search_call', searchId: tool.id, query: toolQuery(tool.input) },
+            { kind: 'search_result', searchId: tool.id, results: [], failed: true },
+          ]);
+        }
+        messages = [
+          ...messages,
+          {
+            role: 'assistant',
+            content: toolUses.map(tool => ({
+              type: 'tool_use', id: tool.id, name: tool.name, input: tool.input ?? {},
+            })),
+          },
+          {
+            role: 'user',
+            content: toolUses.map(tool => ({
+              type: 'tool_result',
+              tool_use_id: tool.id,
+              is_error: true,
+              content: SEARCH_UNAVAILABLE,
+            })),
+          },
+        ];
+        state = await requestRound({
+          model: entry.model,
+          max_tokens: MAX_OUTPUT_TOKENS,
+          stream: true,
+          messages,
+        }, baseHeaders);
+      }
+      if (!state) {
+        finished = true;
+        return;
+      }
+
+      // 正文全为空（例如只剩换行）时给明确提示，避免页面出现一个没有任何内容的回复气泡。
+      if (!answered) {
         push([{
           kind: 'error',
-          message: detail.trim() === ''
-            ? `模型网关返回错误 (HTTP ${response.status})`
-            : `${detail.trim().slice(0, 300)} (HTTP ${response.status})`,
+          message: sawToolUse ? TOOL_UNSUPPORTED_MESSAGE : EMPTY_ANSWER_MESSAGE,
         }]);
-        finished = true;
-        return;
-      }
-      if (!response.body) {
-        push([{ kind: 'error', message: '模型网关返回了空响应。' }]);
-        finished = true;
-        return;
-      }
-
-      const state = createSseState();
-      const decoder = createSseDecoder(state);
-      const textDecoder = new TextDecoder();
-      const reader = response.body.getReader();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        push(decoder.push(textDecoder.decode(value, { stream: true })));
-      }
-      push(decoder.end());
-      if (!state.messageStopped) {
-        push([{ kind: 'error', message: TRUNCATED_MESSAGE }]);
         finished = true;
         return;
       }

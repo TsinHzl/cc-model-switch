@@ -55,15 +55,16 @@
 .chat-session { position: relative; display: flex; align-items: center; }
 .chat-session.is-active .chat-session-main { background: var(--accent-glow); }
 .chat-session-main {
-  flex: 1; text-align: left; border-radius: var(--radius-sm); padding: 8px;
-  background: transparent; border: none; cursor: pointer;
+  flex: 1; text-align: left; border-radius: var(--radius-sm); padding: 8px 34px 8px 8px;
+  background: transparent; border: none; cursor: pointer; min-width: 0;
 }
 .chat-session-main:hover { background: var(--card-hover); }
 .chat-session-title { display: block; font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-session-meta { display: block; font-size: 11px; color: var(--text-dim); margin-top: 2px; }
 .chat-session-del {
-  position: absolute; right: 4px; border: none; background: transparent; color: var(--text-dim);
-  font-size: 15px; cursor: pointer; padding: 4px 6px;
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  border: none; background: transparent; color: var(--text-dim);
+  font-size: 15px; line-height: 1; cursor: pointer; padding: 4px 6px;
 }
 .chat-session-del:hover { color: var(--danger); }
 

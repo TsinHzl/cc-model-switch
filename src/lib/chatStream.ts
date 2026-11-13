@@ -4,6 +4,20 @@ import type { ChatMessage, WebSearchCall } from './chatTypes';
 
 export const STREAM_TRUNCATED_MESSAGE = '回复流意外结束，内容可能不完整；请重试。';
 
+/** 上游把工具调用文本混进正文时的特征（作用于完整正文）：
+ * 1) 一行内含 `mcp__工具…` 与 `→ Run`（工具入参 JSON 序列化）；
+ * 2) 独立的 `mcp__工具{入参}` 块。
+ * 仅用于渲染层展示过滤，不触碰存储数据；对正常正文是幂等的。 */
+const TOOL_LEAK =
+  /[^\n]*mcp__[\w-]+[^\n]*→\s*Run\s*→?[^\n]*|mcp__[\w-]+\s*\{[^{}]*\}/g;
+
+function cleanupText(text: string): string {
+  return text.replace(/ {2,}/g, ' ').replace(/[ \t]+$/gm, '').trim();
+}
+export function stripToolLeak(text: string): string {
+  return cleanupText(text.replace(TOOL_LEAK, ''));
+}
+
 /** 仍为 searching 的搜索在流结束后改记为已中断。 */
 export function settleSearches(message: ChatMessage): ChatMessage {
   if (!message.searches?.some(s => s.status === 'searching')) return message;
@@ -38,8 +52,10 @@ export function reduceChunk(message: ChatMessage, chunk: ChatChunk): ReduceResul
   switch (chunk.kind) {
     case 'thinking':
       return { message: { ...message, reasoning: (message.reasoning ?? '') + chunk.delta }, ended: false };
-    case 'text':
-      return { message: { ...message, content: message.content + chunk.delta }, ended: false };
+    case 'text': {
+      const clean = stripToolLeak((message.content ?? '') + chunk.delta);
+      return { message: { ...message, content: clean }, ended: false };
+    }
     case 'usage':
       return {
         message: {
@@ -54,6 +70,9 @@ export function reduceChunk(message: ChatMessage, chunk: ChatChunk): ReduceResul
       };
     case 'search_call': {
       const call: WebSearchCall = { id: chunk.searchId, query: chunk.query, status: 'searching', results: [] };
+      // 同一 searchId 只保留一条，避免截图所示同类搜索块堆叠。
+      const exists = (message.searches ?? []).some(s => s.id === chunk.searchId);
+      if (exists) return { message, ended: false };
       return { message: { ...message, searches: [...(message.searches ?? []), call] }, ended: false };
     }
     case 'search_result':

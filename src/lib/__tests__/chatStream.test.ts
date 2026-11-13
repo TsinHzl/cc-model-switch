@@ -1,6 +1,6 @@
 /* chatStream 单元测试：增量拼接、停止、错误、未结束截断。 */
 import { describe, expect, it } from 'vitest';
-import { finalizeMessage, reduceChunk, settleSearches } from '../chatStream';
+import { finalizeMessage, reduceChunk, settleSearches, stripToolLeak } from '../chatStream';
 import type { ChatChunk } from '../chatIpcContract';
 import type { ChatMessage } from '../chatTypes';
 
@@ -45,6 +45,32 @@ describe('reduceChunk', () => {
     ]);
     expect(message.searches).toHaveLength(1);
     expect(message.searches![0]).toMatchObject({ status: 'done', query: 'q' });
+  });
+
+  it('同一 searchId 重复的 search_call 只保留一条', () => {
+    const r1 = reduceChunk(
+      { id, role: 'assistant', content: '', status: 'streaming' },
+      chunk('search_call', { searchId: 's1', query: 'q' }),
+    ).message;
+    const r2 = reduceChunk(r1, chunk('search_call', { searchId: 's1', query: 'q' })).message;
+    const r3 = reduceChunk(r2, chunk('search_call', { searchId: 's2', query: 'q2' })).message;
+    expect(r3.searches).toHaveLength(2);
+    const deduped = r3.searches!.filter(s => s.id === 's1');
+    expect(deduped).toHaveLength(1);
+  });
+
+  it('流中剥离泄漏进正文的工具调用片段', () => {
+    const { message } = drain([
+      chunk('text', { delta: 'Fetch Kiwi страница ' }),
+      chunk('text', { delta: '{"id":"mcp__kiwi-tools__web_parse","url":"https://kiro.dev"}' }),
+      chunk('text', { delta: ' → Run →\n\n结果内容' }),
+    ]);
+    expect(message.content).toBe('结果内容');
+  });
+
+  it('正文中的正常文本不被工具泄漏过滤误删', () => {
+    expect(stripToolLeak('正常 文本 。')).toBe('正常 文本 。');
+    expect(stripToolLeak('想看的 mcp 与箭头符号')).toBe('想看的 mcp 与箭头符号');
   });
 
   it('结束标记在 done 时置位，错误置位并记录', () => {

@@ -1,0 +1,25 @@
+src/lib/chatStream.ts
+  98c4f36a379c1547 7-20,55-58,73-75
+src/lib/__tests__/chatStream.test.ts
+  98c4f36a379c1547 3,50-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "dd6f1530dcffe8f752ee80fcf0fab3b47b5a6023",
+  "prompts": {
+    "98c4f36a379c1547": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6af1456f-b119-4f36-a785-9aa212f8a96f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 56,
+      "total_deletions": 11,
+      "accepted_lines": 48,
+      "overriden_lines": 0
+    }
+  }
+}

@@ -1,5 +1,5 @@
 /* chatStore 单元测试：用可控 storage 替身覆盖保存/恢复/删除/清空/配置/降级/剥离附件 data。 */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   clearSessions,
   deleteSession,
@@ -175,5 +175,45 @@ describe('chatStore', () => {
     expect(loadSessionModel(storage, 'missing')).toBeNull();
     storage.setItem('ccms.chat.v1.session:bad', '{broken');
     expect(loadSessionModel(storage, 'bad')).toBeNull();
+  });
+
+  it('会话列表按最近更新降序，修正在存储中的写入顺序', () => {
+    const storage = memoryStorage();
+    // 模拟旧数据：索引按写入顺序（旧→新）保存。
+    storage.setItem('ccms.chat.v1.sessions', JSON.stringify([
+      { id: 'a', title: 'a', updatedAt: 100, messageCount: 1 },
+      { id: 'b', title: 'b', updatedAt: 300, messageCount: 1 },
+      { id: 'c', title: 'c', updatedAt: 200, messageCount: 1 },
+    ]));
+    expect(listSessions(storage).sessions.map(s => s.id)).toEqual(['b', 'c', 'a']);
+  });
+
+  it('同一 updatedAt 的会话保持原有相对顺序', () => {
+    const storage = memoryStorage();
+    storage.setItem('ccms.chat.v1.sessions', JSON.stringify([
+      { id: 'a', title: 'a', updatedAt: 100, messageCount: 1 },
+      { id: 'b', title: 'b', updatedAt: 100, messageCount: 1 },
+    ]));
+    expect(listSessions(storage).sessions.map(s => s.id)).toEqual(['a', 'b']);
+  });
+
+  it('保存新会话后排在最前，覆盖既有会话更新其位置', () => {
+    const storage = memoryStorage();
+    // 同毫秒内两次保存的 updatedAt 相同，稳定排序会保留写入顺序；用假时钟拉开时间。
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      const a = saveSession(storage, { id: null, title: 'a', createdAt: 0, model: '', messages: [message('user', '1')] });
+      vi.setSystemTime(2_000);
+      const b = saveSession(storage, { id: null, title: 'b', createdAt: 0, model: '', messages: [message('user', '2')] });
+      expect(listSessions(storage).sessions.map(s => s.id)).toEqual([b.id, a.id]);
+      // 重新保存 a 时 updatedAt 变大，应回到最前。
+      vi.setSystemTime(3_000);
+      saveSession(storage, { id: a.id, title: 'a', createdAt: 0, model: '', messages: [message('user', '3')] });
+      expect(listSessions(storage).sessions[0]!.id).toBe(a.id);
+      expect(listSessions(storage).sessions.map(s => s.id)).toEqual([a.id, b.id]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

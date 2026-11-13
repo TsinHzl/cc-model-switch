@@ -55,6 +55,7 @@ interface CountedStorage {
 
 /**
  * 读取会话索引。getItem 抛异常视为存储不可用（降级）；返回 null 或非法 JSON 视为无会话。
+ * 结果按最近更新降序：旧数据按写入顺序追加在尾部，不能依赖存储顺序。
  */
 export function listSessions(storage: CountedStorage): ListSessionsResult {
   let raw: string | null = null;
@@ -68,10 +69,12 @@ export function listSessions(storage: CountedStorage): ListSessionsResult {
   if (raw === null) return { degraded: false, sessions: [] };
   try {
     const parsed: unknown = JSON.parse(raw);
-    return {
-      degraded: false,
-      sessions: Array.isArray(parsed) ? (parsed as SessionMeta[]) : [],
-    };
+    if (!Array.isArray(parsed)) return { degraded: false, sessions: [] };
+    const sessions = (parsed as SessionMeta[])
+      .filter(s => s && typeof s === 'object')
+      // 稳定排序：Array.prototype.sort 在 ES2019+ 保证稳定，同一 updatedAt 保持原序。
+      .sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0));
+    return { degraded: false, sessions };
   } catch {
     return { degraded: false, sessions: [] };
   }

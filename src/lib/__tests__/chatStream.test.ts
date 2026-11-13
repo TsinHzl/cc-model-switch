@@ -65,7 +65,27 @@ describe('reduceChunk', () => {
       chunk('text', { delta: '{"id":"mcp__kiwi-tools__web_parse","url":"https://kiro.dev"}' }),
       chunk('text', { delta: ' → Run →\n\n结果内容' }),
     ]);
-    expect(message.content).toBe('结果内容');
+    expect(finalizeMessage(message, { ended: true }, false).message.content).toBe('结果内容');
+  });
+
+  it('分块到达的 Markdown 表格保留换行', () => {
+    const { message } = drain([
+      chunk('text', { delta: '| 模型 | 状态 |\n' }),
+      chunk('text', { delta: '| --- | --- |\n' }),
+      chunk('text', { delta: '| Opus | ✅ |' }),
+    ]);
+    const expected = '| 模型 | 状态 |\n| --- | --- |\n| Opus | ✅ |';
+    expect(message.content).toBe(expected);
+    expect(finalizeMessage(message, { ended: true }, false).message.content).toBe(expected);
+  });
+
+  it('分块到达的 Markdown 列表与标题保留换行', () => {
+    const { message } = drain([
+      chunk('text', { delta: '## 一、Anthropic\n' }),
+      chunk('text', { delta: '- Claude Opus5.5\n' }),
+      chunk('text', { delta: '- Claude Sonnet5.5\n' }),
+    ]);
+    expect(message.content).toBe('## 一、Anthropic\n- Claude Opus5.5\n- Claude Sonnet5.5\n');
   });
 
   it('正文中的正常文本不被工具泄漏过滤误删', () => {

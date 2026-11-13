@@ -12,10 +12,19 @@ const TOOL_LEAK =
   /[^\n]*mcp__[\w-]+[^\n]*→\s*Run\s*→?[^\n]*|mcp__[\w-]+\s*\{[^{}]*\}/g;
 
 function cleanupText(text: string): string {
-  return text.replace(/ {2,}/g, ' ').replace(/[ \t]+$/gm, '').trim();
+  return text.trim();
 }
+
+/** 流式阶段只去工具泄漏片段，保留换行：此处若 trim 会吃掉尾部 `\n`，
+ * 下一块 delta 便粘在同一行，表格 / 列表 / 标题因此失去 Markdown 结构。 */
+function stripToolLeakIncremental(text: string): string {
+  return text.replace(TOOL_LEAK, '');
+}
+
+/** 整段文本到齐后收敛首尾空白。不压缩行内空格、不动行首缩进，
+ * 否则会破坏代码块与嵌套列表排版。 */
 export function stripToolLeak(text: string): string {
-  return cleanupText(text.replace(TOOL_LEAK, ''));
+  return cleanupText(stripToolLeakIncremental(text));
 }
 
 /** 仍为 searching 的搜索在流结束后改记为已中断。 */
@@ -53,7 +62,8 @@ export function reduceChunk(message: ChatMessage, chunk: ChatChunk): ReduceResul
     case 'thinking':
       return { message: { ...message, reasoning: (message.reasoning ?? '') + chunk.delta }, ended: false };
     case 'text': {
-      const clean = stripToolLeak((message.content ?? '') + chunk.delta);
+      // 流式阶段不做 trim：保留块尾换行，后续 delta 才能落到新行。
+      const clean = stripToolLeakIncremental((message.content ?? '') + chunk.delta);
       return { message: { ...message, content: clean }, ended: false };
     }
     case 'usage':
@@ -114,7 +124,8 @@ export function finalizeMessage(
   result: Pick<ReduceResult, 'ended' | 'errorCode' | 'errorMessage'>,
   aborted: boolean,
 ): { message: ChatMessage; status: FinalStatus } {
-  const base = settleSearches(message);
+  // 流结束才收敛正文首尾空白与残留空格，避免破坏流式过程中的换行结构。
+  const base = settleSearches({ ...message, content: stripToolLeak(message.content) });
   if (aborted || result.errorCode === 'ABORTED') {
     return { message: { ...base, status: 'stopped' }, status: 'stopped' };
   }

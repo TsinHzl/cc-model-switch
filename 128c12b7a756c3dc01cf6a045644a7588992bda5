@@ -1,0 +1,25 @@
+src/lib/__tests__/chatStore.test.ts
+  fc214a46bf819dce 179-218
+src/lib/chatStore.ts
+  fc214a46bf819dce 58,72-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "128c12b7a756c3dc01cf6a045644a7588992bda5",
+  "prompts": {
+    "fc214a46bf819dce": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83fdcfe3-808e-459f-93cc-9989f829707c",
+        "model": "deepseek-v4.1-flash-1017"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 53,
+      "total_deletions": 10,
+      "accepted_lines": 47,
+      "overriden_lines": 0
+    }
+  }
+}

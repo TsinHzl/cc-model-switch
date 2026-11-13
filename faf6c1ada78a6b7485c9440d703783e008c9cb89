@@ -1,0 +1,29 @@
+electron/__tests__/chatIpc.test.ts
+  fc214a46bf819dce 300-437
+src/lib/__tests__/sse.test.ts
+  fc214a46bf819dce 2-3,116-155
+electron/chatIpc.ts
+  fc214a46bf819dce 8-10,20-25,108,110-112,119-171,185-229,231,236-241
+src/lib/sse.ts
+  fc214a46bf819dce 7-8,11-12,16-18,74-107,128-131,153-157,170-172,174
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "faf6c1ada78a6b7485c9440d703783e008c9cb89",
+  "prompts": {
+    "fc214a46bf819dce": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83fdcfe3-808e-459f-93cc-9989f829707c",
+        "model": "deepseek-v4.1-flash-1017"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 404,
+      "total_deletions": 93,
+      "accepted_lines": 356,
+      "overriden_lines": 0
+    }
+  }
+}

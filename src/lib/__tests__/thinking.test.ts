@@ -27,8 +27,8 @@ describe('思考力度', () => {
     expect(thinkingMode('GPT-5')).toBe('effort');
   });
 
-  it('budget 模式只提供四档', () => {
-    expect(effortOptionsFor('claude-opus-4-5')).toEqual(['off', 'low', 'medium', 'high']);
+  it('budget 模式提供六档', () => {
+    expect(effortOptionsFor('claude-opus-4-5')).toEqual(['off', 'low', 'medium', 'high', 'xhigh', 'max']);
   });
 
   it('effort 模式提供六档', () => {
@@ -36,11 +36,7 @@ describe('思考力度', () => {
     expect(EFFORT_OPTIONS).toHaveLength(6);
   });
 
-  it.each(['xhigh', 'max'] as const)('budget 模式把 %s 收敛为 high', effort => {
-    expect(normalizeEffort('claude-opus-4-5', effort)).toBe('high');
-  });
-
-  it.each(['off', 'low', 'medium', 'high'] as const)('budget 模式保留 %s', effort => {
+  it.each(['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const)('budget 模式保留 %s', effort => {
     expect(normalizeEffort('claude-opus-4-5', effort)).toBe(effort);
   });
 
@@ -60,7 +56,11 @@ describe('思考力度', () => {
     expect(thinkingRequestFields('claude-opus-4-5', 'medium'))
       .toEqual({ thinking: { type: 'enabled', budget_tokens: 10240 } });
     expect(thinkingRequestFields('claude-opus-4-5', 'high'))
-      .toEqual({ thinking: { type: 'enabled', budget_tokens: 20000 } });
+      .toEqual({ thinking: { type: 'enabled', budget_tokens: 12288 } });
+    expect(thinkingRequestFields('claude-opus-4-5', 'xhigh'))
+      .toEqual({ thinking: { type: 'enabled', budget_tokens: 14336 } });
+    expect(thinkingRequestFields('claude-opus-4-5', 'max'))
+      .toEqual({ thinking: { type: 'enabled', budget_tokens: 15360 } });
   });
 
   it('effort 模式发送 adaptive + output_config', () => {

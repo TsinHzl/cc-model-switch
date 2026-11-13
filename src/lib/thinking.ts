@@ -7,7 +7,7 @@ export const EFFORT_OPTIONS = Object.freeze(
 ) as readonly ChatEffort[];
 
 const BUDGET_EFFORT_OPTIONS = Object.freeze(
-  ['off', 'low', 'medium', 'high'],
+  ['off', 'low', 'medium', 'high', 'xhigh', 'max'],
 ) as readonly ChatEffort[];
 
 /** Claude 4.5 代际（含带日期的连字符别名）走 budget 模式。 */
@@ -28,8 +28,10 @@ export function normalizeEffort(modelId: string, effort: ChatEffort): ChatEffort
   return effortOptionsFor(modelId).includes(effort) ? effort : 'high';
 }
 
+/** budget_tokens 必须小于主进程的 MAX_OUTPUT_TOKENS（16384），
+ * 否则网关拒绝请求；最高档留 1024 token 给正文。 */
 const BUDGET_TOKENS: Partial<Record<ChatEffort, number>> = Object.freeze({
-  low: 4096, medium: 10240, high: 20000,
+  low: 4096, medium: 10240, high: 12288, xhigh: 14336, max: 15360,
 });
 
 /** 请求体里的 thinking / output_config；off 时两者都不带。 */

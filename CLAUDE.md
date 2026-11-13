@@ -23,6 +23,8 @@ npm test -- server/__tests__/service.test.ts electron/__tests__/configIpc.test.t
 npm test -- src/lib/__tests__/applyConfig.test.ts
 npm test -- -t "关键词"
 npx tsc -b                 # 页面类型检查；仓库无 ESLint/Prettier 配置
+npm run desktop:test:build && node electron/__tests__/native-acceptance.mjs
+                           # macOS arm64 隔离原生验收（CDP 驱动 out-test 入口，不触碰真实 home）
 ```
 
 注意生产入口使用真实账户 home；自动化验收必须使用隔离入口，不得结束非本次创建的进程。运行时下载失败时不得关闭证书校验或 sandbox。
@@ -35,6 +37,8 @@ npx tsc -b                 # 页面类型检查；仓库无 ESLint/Prettier 配�
 - 页面禁用 Node，启用 sandbox、contextIsolation、webSecurity，禁止 webview；preload 只暴露 platform、五个配置方法、只写剪贴板和 `chat`（start/cancel/onChunk），不暴露通用 IPC、FFI、路径、命令或 URL 代理。
 - 配置 IPC 检查当前窗口、主 frame、实际 origin 与页面地址、严格结构及 64 KiB 紧凑 JSON 等价预算；五方法共用一个在途名额，忙时拒绝、不排队。预算不覆盖传输前克隆开销，单名额不是频率限流。
 - 对话 `chat:start` 只收 `model + base_url` 与消息体，主进程按二者在最新 config 中定位自取 key，只允许 http(s)、禁止重定向、保留 TLS 校验，单条在途；密钥不进入 renderer，错误不暴露原文。
+- 上限分散在各契约层，改一处需同时核对：配置文件读写 4 MiB（`server/files.ts`）、配置 IPC 紧凑 JSON 64 KiB（`electron/configIpc.ts`）、对话请求 8 MiB（`src/lib/chatIpcContract.ts`）、剪贴板 1 MiB（`src/lib/clipboardIpcContract.ts`）。对话 `max_tokens` 固定 16384，budget 思考档最高 15360（`src/lib/thinking.ts`）。
+- `dist/`、`dist-server/`、`.server.log`、`.server.pid` 是已移除的独立 Node 配置服务残留，均已 gitignore；不要据此恢复服务，也不要当作构建输入。
 - `server/files.ts` 固定 config（`~/change-ai-config.json`）、settings（`~/.claude/settings.json`）、zshrc（`~/.zshrc`）；只有 config/zshrc 可写。
 - `server/service.ts` 用 Zod 校验业务输入和磁盘列表，直接导入 `applyConfig.ts`、`configModel.ts` 纯函数；不要复制转义或分组算法。错误不暴露文件原文、密钥或真实 home。
 
@@ -43,6 +47,7 @@ npx tsc -b                 # 页面类型检查；仓库无 ESLint/Prettier 配�
 - `apiClient.ts` 调用 `desktop.config` 固定方法，缺桥接明确报错，不回退 HTTP；状态返回校验后的 entries/groups/activeIndex，不返回文件原文。
 - `configStore.loadConfigState()` 调用 state 桥接；主进程读取三个最新文件，按 URL → channel 分组，保留 JSON 顺序及原数组下标。分组扁平序不等于数组序。
 - `readActive()` 优先使用 settings env 的 model/base_url/key 三元组：任意字段非空即使用，三字段全空或解析失败才回退 zshrc；`findActiveIndex()` 要求完全相等。
+- 思考参数由 `src/lib/thinking.ts` 按模型 id 分支：Claude 4.5（含带日期连字符别名）与未知系列走 budget（`thinking.budget_tokens`），其余 `claude-*`/`gpt-*` 走 effort（`thinking.adaptive` + `output_config.effort`）；已存档位不被当前模型支持时收敛为 `high`。
 - `apply` 按 expected 三元组在最新 config 中定位，仅写 zshrc，settings 原样保留；channel 不参与身份判定。
 - `add` 新增，`edit/remove` 同时校验原下标和 expected 三元组。新增/删除保留其他条目的未知字段；编辑整体替换目标为四个已知字段。
 - 写成功为 `{ success: true }`，不附带状态；客户端写失败抛 ApiError。`reload()` 返回 boolean 且自行设置安全错误态，`applyModel()` 写成功后返回刷新结果；不能把刷新失败当作写入未发生。
@@ -78,4 +83,5 @@ npx tsc -b                 # 页面类型检查；仓库无 ESLint/Prettier 配�
 ## 规范
 
 - `openspec/specs/cc-config-management/spec.md` 是当前行为规范，`openspec/project.md` 记录架构约定；归档保留历史，不作为恢复旧行为的依据。
+- `openspec/changes/platform-native-acceptance/tasks.md` 是进行中变更的任务清单（IN_PROGRESS），该范围内的实施以它逐项勾选为准。
 - 常规提交格式沿用 `<type>: <中文描述>`；用户确认跳过 OpenSpec 的变更遵守其专用提交前缀约定。

@@ -1,0 +1,23 @@
+src/components/chat/ChatPage.tsx
+  fc214a46bf819dce 390-391
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "7b38b74ac747538b06afaf36b481ec42d8f2de8c",
+  "prompts": {
+    "fc214a46bf819dce": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83fdcfe3-808e-459f-93cc-9989f829707c",
+        "model": "deepseek-v4.1-flash-1017"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 2,
+      "accepted_lines": 2,
+      "overriden_lines": 0
+    }
+  }
+}

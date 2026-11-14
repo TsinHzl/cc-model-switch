@@ -97,6 +97,8 @@ export function ChatPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [degraded, setDegraded] = useState(false);
   const [confirmingClear, setConfirmingClear] = useState(false);
+  // 侧栏为覆盖式抽屉，默认收起；不占内容宽度，保证消息区与配置页等宽。
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -371,15 +373,29 @@ export function ChatPage() {
 
   return (
     <div className="chat-page">
-      <SessionsSidebar
-        sessions={sessions}
-        activeId={activeId}
-        locked={isGenerating}
-        onNew={startNew}
-        onSelect={changeActive}
-        onDelete={removeSession}
-        onClearAll={() => setConfirmingClear(true)}
-      />
+      <button
+        type="button"
+        className="chat-sidebar-toggle"
+        aria-expanded={sidebarOpen}
+        title={sidebarOpen ? '收起历史' : '展开历史'}
+        onClick={() => setSidebarOpen(v => !v)}
+      >
+        ☰ 历史
+      </button>
+      {sidebarOpen && (
+        <div className="chat-sidebar-mask" onClick={() => setSidebarOpen(false)} />
+      )}
+      <div className={`chat-sidebar-drawer${sidebarOpen ? ' is-open' : ''}`}>
+        <SessionsSidebar
+          sessions={sessions}
+          activeId={activeId}
+          locked={isGenerating}
+          onNew={() => { setSidebarOpen(false); startNew(); }}
+          onSelect={id => { setSidebarOpen(false); changeActive(id); }}
+          onDelete={removeSession}
+          onClearAll={() => setConfirmingClear(true)}
+        />
+      </div>
       <div className="chat-main">
         <div className="chat-messages" ref={listRef} onScroll={onMessagesScroll}>
           {messages.length === 0 ? (

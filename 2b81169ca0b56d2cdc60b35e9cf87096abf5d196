@@ -1,0 +1,29 @@
+src/lib/measureLatency.ts
+  fc214a46bf819dce 3-4,12,17
+src/lib/__tests__/measureLatency.test.ts
+  fc214a46bf819dce 34,39,63,68
+electron/__tests__/native-acceptance.mjs
+  fc214a46bf819dce 301-309,321-322,324-328,331,338-339
+src/components/ModelSwitch.tsx
+  fc214a46bf819dce 312
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "2b81169ca0b56d2cdc60b35e9cf87096abf5d196",
+  "prompts": {
+    "fc214a46bf819dce": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83fdcfe3-808e-459f-93cc-9989f829707c",
+        "model": "deepseek-v4.1-flash-1017"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 28,
+      "total_deletions": 12,
+      "accepted_lines": 28,
+      "overriden_lines": 0
+    }
+  }
+}

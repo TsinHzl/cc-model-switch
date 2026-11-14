@@ -10,6 +10,7 @@ import { maskKey } from '../lib/maskKey';
 import { latencyText, measureLatency } from '../lib/measureLatency';
 import { EntryForm, type EditMode, type AddPreset } from './EntryForm';
 import { ConfirmDelete } from './ConfirmDelete';
+import { useModalClose } from './useModalClose';
 import pkg from '../../package.json';
 
 export default function ModelSwitch() {
@@ -56,12 +57,14 @@ export default function ModelSwitch() {
       showToast(refreshed ? 'ok' : 'err', refreshed
         ? message : `${message}，但状态刷新失败；请重试读取，不要重复写入。`);
     } catch (err) {
+      // 弹窗已播完退场动画处于不可见态，必须卸载，否则下次打开会带着关闭态复活。
+      // 失败信息由 toast 给出，并明确要求先核对状态、不要重复写入。
+      setPending(null);
       showToast('err', err instanceof ApiError ? err.message : '操作结果无法确认，请刷新状态核对，不要重复写入。');
     } finally {
       setBusy(false);
     }
   };
-
   /** 复制条目 API Key 到剪贴板，成功/失败均 toast 反馈 */
   const copyKey = async (entry: ConfigEntry) => {
     try {
@@ -564,8 +567,24 @@ function ConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  // 写入由父级执行并负责置 busy；退场动画结束后才通知父级，避免弹窗瞬间消失。
+  const actionRef = useRef<'cancel' | 'confirm' | null>(null);
+  const { closing, requestClose, onAnimationEnd } = useModalClose(() => {
+    if (actionRef.current === 'confirm') onConfirm();
+    else onCancel();
+  });
+  const close = (action: 'cancel' | 'confirm') => {
+    if (closing) return;
+    actionRef.current = action;
+    requestClose();
+  };
   return (
-    <div className="modal-mask" role="dialog" aria-modal="true">
+    <div
+      className={`modal-mask${closing ? ' is-closing' : ''}`}
+      role="dialog"
+      aria-modal="true"
+      onAnimationEnd={onAnimationEnd}
+    >
       <div className="modal">
         <h2>确认切换</h2>
         <dl className="confirm-grid">
@@ -589,10 +608,10 @@ function ConfirmDialog({
         <p className="hint">仅更新 ~/.zshrc 标记块，不修改 settings.json；写入成功后，激活高亮仍可能由 settings.json 决定。</p>
         <p className="hint">已打开的终端不会即时生效，请在新开的 shell / Claude 会话中确认配置。</p>
         <div className="modal-actions">
-          <button className="btn" onClick={onCancel} disabled={busy}>
+          <button className="btn" onClick={() => close('cancel')} disabled={busy || closing}>
             取消
           </button>
-          <button className="btn btn-primary" onClick={onConfirm} disabled={busy}>
+          <button className="btn btn-primary" onClick={() => close('confirm')} disabled={busy || closing}>
             {busy ? '写入中…' : '确认切换'}
           </button>
         </div>

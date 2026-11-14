@@ -387,8 +387,8 @@ export function ChatPage() {
           sessions={sessions}
           activeId={activeId}
           locked={isGenerating}
-          onNew={() => { setSidebarOpen(false); startNew(); }}
-          onSelect={id => { setSidebarOpen(false); changeActive(id); }}
+          onNew={startNew}
+          onSelect={changeActive}
           onDelete={removeSession}
           onClearAll={() => setConfirmingClear(true)}
         />

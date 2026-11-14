@@ -1,0 +1,39 @@
+src/components/useModalClose.ts
+  fc214a46bf819dce 1-63
+src/components/ConfirmDelete.tsx
+  fc214a46bf819dce 2,5,19-29,31-36,55,62,64
+src/components/EntryForm.tsx
+  fc214a46bf819dce 2,5,57-62,94-99,123-128,138-146,149
+src/components/__tests__/modalTransitions.test.tsx
+  fc214a46bf819dce 1-47
+src/components/chat/ConfirmClearAll.tsx
+  fc214a46bf819dce 2-4,14-24,26-31,37,40
+src/components/__tests__/modalClose.test.ts
+  fc214a46bf819dce 1-92
+src/components/modalClose.ts
+  fc214a46bf819dce 1-50
+src/styles/components.css
+  fc214a46bf819dce 600-601,612,615-617,631-677
+src/components/ModelSwitch.tsx
+  fc214a46bf819dce 13,60-62,570-580,582-587,611,614
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "2320613dac112d36c82d7bee3273d7dd62cb458d",
+  "prompts": {
+    "fc214a46bf819dce": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83fdcfe3-808e-459f-93cc-9989f829707c",
+        "model": "deepseek-v4.1-flash-1017"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 567,
+      "total_deletions": 106,
+      "accepted_lines": 478,
+      "overriden_lines": 0
+    }
+  }
+}

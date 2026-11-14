@@ -597,6 +597,8 @@
 }
 
 /* ============ 弹窗（沿用结构，换用新主题） ============ */
+/* 动画时长必须与 src/components/modalClose.ts 的 MODAL_ANIMATION_MS 一致：
+   关闭时组件延迟 180ms 卸载，靠这里的退场动画填满这段可见时间。 */
 .modal-mask {
   position: fixed;
   inset: 0;
@@ -607,6 +609,12 @@
   justify-content: center;
   padding: 24px;
   z-index: 100;
+  animation: modal-mask-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.modal-mask.is-closing {
+  animation: modal-mask-out 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  pointer-events: none;
 }
 
 .modal {
@@ -620,6 +628,53 @@
   flex-direction: column;
   gap: 16px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  animation: modal-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.modal-mask.is-closing .modal {
+  animation: modal-out 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes modal-mask-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-mask-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes modal-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+/* 减弱动态效果：不做动画，也不叠加任何视觉位移。 */
+@media (prefers-reduced-motion: reduce) {
+  .modal-mask,
+  .modal,
+  .modal-mask.is-closing,
+  .modal-mask.is-closing .modal {
+    animation: none;
+  }
 }
 
 .modal h2 {

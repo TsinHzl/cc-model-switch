@@ -1,7 +1,8 @@
 /* 配置条目表单：新增（可选预设锁定）/ 编辑，必填校验 */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { ConfigEntry } from '../lib/applyConfig';
 import { maskKey } from '../lib/maskKey';
+import { useModalClose } from './useModalClose';
 
 /** add 分支的预设锁定：URL 入口锁 base_url；渠道入口锁 base_url + channel */
 export interface AddPreset {
@@ -53,6 +54,12 @@ export function EntryForm({
   const [form, setForm] = useState<ConfigEntry>(presetResolved?.initial ?? initial);
   const [errors, setErrors] = useState<Partial<Record<keyof ConfigEntry, string>>>({});
   const [busy, setBusy] = useState(false);
+  // 提交需要带上动画结束时的最新表单值；取消则直接关闭。
+  const submitRef = useRef(false);
+  const { closing, requestClose, onAnimationEnd } = useModalClose(() => {
+    if (submitRef.current) void submit();
+    else onCancel();
+  });
 
   const set = (field: keyof ConfigEntry) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((f) => ({ ...f, [field]: e.target.value }));
@@ -71,7 +78,6 @@ export function EntryForm({
   };
 
   const submit = async () => {
-    if (!validate()) return;
     setBusy(true);
     try {
       await onSubmit({
@@ -83,6 +89,14 @@ export function EntryForm({
     } finally {
       setBusy(false);
     }
+  };
+
+  /** 校验通过才播放退场动画；校验失败保留弹窗并展示错误。 */
+  const startSubmit = () => {
+    if (closing || busy) return;
+    if (!validate()) return;
+    submitRef.current = true;
+    requestClose();
   };
 
   const field = (label: string, name: keyof ConfigEntry, placeholder: string, locked = false) => (
@@ -106,7 +120,12 @@ export function EntryForm({
   );
 
   return (
-    <div className="modal-mask" role="dialog" aria-modal="true">
+    <div
+      className={`modal-mask${closing ? ' is-closing' : ''}`}
+      role="dialog"
+      aria-modal="true"
+      onAnimationEnd={onAnimationEnd}
+    >
       <div className="modal">
         <h2>{mode.kind === 'add' ? '新增配置' : `编辑：${initial.model}`}</h2>
         <div className="form-grid">
@@ -116,10 +135,18 @@ export function EntryForm({
           {field('渠道（可选）', 'channel', '留空则归入"默认渠道"', lockChannel)}
         </div>
         <div className="modal-actions">
-          <button className="btn" onClick={onCancel} disabled={busy}>
+          <button
+            className="btn"
+            onClick={() => {
+              if (closing || busy) return;
+              submitRef.current = false;
+              requestClose();
+            }}
+            disabled={busy || closing}
+          >
             取消
           </button>
-          <button className="btn btn-primary" onClick={() => void submit()} disabled={busy}>
+          <button className="btn btn-primary" onClick={startSubmit} disabled={busy || closing}>
             {busy ? '保存中…' : '保存'}
           </button>
         </div>

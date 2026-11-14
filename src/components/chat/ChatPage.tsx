@@ -97,8 +97,8 @@ export function ChatPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [degraded, setDegraded] = useState(false);
   const [confirmingClear, setConfirmingClear] = useState(false);
-  // 侧栏为覆盖式抽屉，默认收起；不占内容宽度，保证消息区与配置页等宽。
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  // 侧栏为覆盖式抽屉，默认展开以常驻显示历史；收起时让出消息区宽度。
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -382,9 +382,6 @@ export function ChatPage() {
       >
         ☰ 历史
       </button>
-      {sidebarOpen && (
-        <div className="chat-sidebar-mask" onClick={() => setSidebarOpen(false)} />
-      )}
       <div className={`chat-sidebar-drawer${sidebarOpen ? ' is-open' : ''}`}>
         <SessionsSidebar
           sessions={sessions}
@@ -396,7 +393,7 @@ export function ChatPage() {
           onClearAll={() => setConfirmingClear(true)}
         />
       </div>
-      <div className="chat-main">
+      <div className={`chat-main${sidebarOpen ? ' with-sidebar' : ''}`}>
         <div className="chat-messages" ref={listRef} onScroll={onMessagesScroll}>
           {messages.length === 0 ? (
             <div className="chat-empty">

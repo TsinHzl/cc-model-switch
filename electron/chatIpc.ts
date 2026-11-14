@@ -22,6 +22,8 @@ const SEARCH_UNAVAILABLE = '联网搜索在本网关不可用，请基于已有�
 /** 网关把搜索当客户端 tool_use 时最多回填的轮数，防止反复触发造成无限请求。 */
 const MAX_TOOL_ROUNDS = 2;
 const TOOL_UNSUPPORTED_MESSAGE = '该网关不执行联网搜索，且未能生成正文；请关闭联网搜索后重试。';
+/** 回填用尽后正文仍停在过渡前言：明确告知不完整，避免被当成完整答复。 */
+const INCOMPLETE_MESSAGE = '回复只输出了开头就停止了（网关未执行联网搜索）；请重试或关闭联网搜索。';
 const EMPTY_ANSWER_MESSAGE = '模型网关未返回任何正文内容；请重试或更换模型。';
 
 export interface ChatHandlerOptions {
@@ -187,16 +189,24 @@ export function createChatHandlers(options: ChatHandlerOptions) {
       // 每轮都不带 tools / thinking，让模型改用已有知识作答。
       let messages: unknown[] = [...request.messages];
       let sawToolUse = false;
+      /** 回填上限用尽时本轮仍停在 tool_use：正文只可能是过渡前言，必须按失败收尾。 */
+      let stalled = false;
       let state = await requestRound(body, searchHeaders);
       for (let round = 0; state; round += 1) {
         // 只回填搜索工具：其它客户端工具不属于本功能的处理范围，否则会给出错误的工具结果。
         const toolUses: ClientToolUse[] = clientToolUses(state)
           .filter(tool => tool.name.includes('web_search'));
         if (toolUses.length > 0) sawToolUse = true;
-        const blocked = request.webSearch && !answered && state.stopReason === 'tool_use'
+        // stop_reason=tool_use 表示本轮尚未答完（在等工具结果）。此时即使已经输出过
+        // 过渡性前言（"让我先搜索一下…"），也必须有后续正文，否则回复会停在半句。
+        const blocked = request.webSearch && state.stopReason === 'tool_use'
           && toolUses.length > 0;
-        // 已产出正文、未开启联网或本轮正常结束时都无需再回填，避免多计一次请求。
-        if (!blocked || round >= MAX_TOOL_ROUNDS) break;
+        if (!blocked) break;
+        // 已产出正文但本轮未答完时同样要回填；只有回填次数用尽才按失败收尾。
+        if (round >= MAX_TOOL_ROUNDS) {
+          stalled = true;
+          break;
+        }
         for (const tool of toolUses) {
           push([
             { kind: 'search_call', searchId: tool.id, query: toolQuery(tool.input) },
@@ -233,7 +243,16 @@ export function createChatHandlers(options: ChatHandlerOptions) {
         return;
       }
 
+      // 回填用尽仍停在 tool_use：已收到的只是过渡前言，不能当成完整答复。
       // 正文全为空（例如只剩换行）时给明确提示，避免页面出现一个没有任何内容的回复气泡。
+      if (stalled) {
+        push([{
+          kind: 'error',
+          message: answered ? INCOMPLETE_MESSAGE : TOOL_UNSUPPORTED_MESSAGE,
+        }]);
+        finished = true;
+        return;
+      }
       if (!answered) {
         push([{
           kind: 'error',

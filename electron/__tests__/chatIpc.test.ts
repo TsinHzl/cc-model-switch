@@ -378,10 +378,12 @@ describe('对话 handler 边界', () => {
     expect(error.message).toContain('未返回任何正文');
   });
 
-  it('首轮已有正文时即使收尾为 tool_use 也不再回填', async () => {
-    fetchMock.mockResolvedValue(sseResponse([
+  it('首轮只输出过渡前言、收尾为 tool_use 时仍回填并拿到正文', async () => {
+    // 复现截图问题：模型先说"让我先搜索一下"，随后发起 tool_use 结束本轮。
+    // 若把这段前言当成已作答，回复就会停在半句。
+    const frames = [
       `data: ${JSON.stringify({
-        type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '已有答案' },
+        type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '让我先搜索一下。' },
       })}\n\n`,
       `data: ${JSON.stringify({
         type: 'content_block_start', index: 1,
@@ -390,11 +392,45 @@ describe('对话 handler 边界', () => {
       `data: ${JSON.stringify({
         type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: {},
       })}\n\n`,
-    ]));
+    ];
+    fetchMock
+      .mockResolvedValueOnce(sseResponse(frames))
+      .mockResolvedValueOnce(sseResponse(textFrames('完整正文')));
+
     const handlers = build();
     await handlers.start(source.event, request({ webSearch: true }));
     await vi.waitFor(() => expect(sent.at(-1)?.kind).toBe('done'));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const texts = sent.filter(chunk => chunk.kind === 'text')
+      .map(chunk => (chunk as { delta: string }).delta).join('');
+    expect(texts).toBe('让我先搜索一下。完整正文');
+    // 不得把只有前言的结果误报为不完整。
+    expect(sent.some(chunk => chunk.kind === 'error')).toBe(false);
+  });
+
+  it('回填用尽后仍停在 tool_use 时明确提示回复不完整', async () => {
+    // 每轮都只有前言 + tool_use：正文不足以构成答复，不能静默当作完成。
+    fetchMock.mockImplementation(async () => sseResponse([
+      `data: ${JSON.stringify({
+        type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '让我先搜索一下。' },
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        type: 'content_block_start', index: 1,
+        content_block: { type: 'tool_use', name: 'web_search', id: 'call_6', input: {} },
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: {},
+      })}\n\n`,
+    ]));
+    const handlers = build();
+    await handlers.start(source.event, request({ webSearch: true }));
+    await vi.waitFor(() => expect(sent.some(chunk => chunk.kind === 'error')).toBe(true));
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(sent.some(chunk => chunk.kind === 'done')).toBe(false);
+    const error = sent.find(chunk => chunk.kind === 'error') as { message: string };
+    expect(error.message).toContain('只输出了开头就停止了');
   });
 
   it('回填轮仍返回 tool_use 时最多重试到上限后报错', async () => {

@@ -1,5 +1,7 @@
 const REQUEST_TIMEOUT_MS = 5_000;
 
+/** 网关常用 302 跳登录页且不带 CORS 头；测速只需 RTT，
+    故用 no-cors 跟随重定向，避免跨源读取限制把可用网关误判为失败。 */
 async function probe(url: string, method: 'HEAD' | 'GET'): Promise<number | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -7,11 +9,12 @@ async function probe(url: string, method: 'HEAD' | 'GET'): Promise<number | null
   try {
     await fetch(url, {
       method,
+      mode: 'no-cors',
       signal: controller.signal,
       credentials: 'omit',
       referrerPolicy: 'no-referrer',
       cache: 'no-store',
-      redirect: 'error',
+      redirect: 'follow',
     });
     return Math.round(performance.now() - start);
   } catch {

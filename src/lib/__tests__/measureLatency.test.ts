@@ -31,11 +31,12 @@ describe('桌面 renderer 测速', () => {
       await expect(measureLatency(url)).resolves.toBe(79);
       expect(fetchMock.mock.calls).toEqual([[url, {
         method: 'HEAD',
+        mode: 'no-cors',
         signal: expect.any(AbortSignal),
         credentials: 'omit',
         referrerPolicy: 'no-referrer',
         cache: 'no-store',
-        redirect: 'error',
+        redirect: 'follow',
       }]]);
       const signal = fetchMock.mock.calls[0]![1]!.signal!;
       await vi.advanceTimersByTimeAsync(5_000);
@@ -59,11 +60,12 @@ describe('桌面 renderer 测速', () => {
     expect(fetchMock.mock.calls).toEqual(
       ['HEAD', 'GET'].map(method => ['https://example.invalid/', {
         method,
+        mode: 'no-cors',
         signal: expect.any(AbortSignal),
         credentials: 'omit',
         referrerPolicy: 'no-referrer',
         cache: 'no-store',
-        redirect: 'error',
+        redirect: 'follow',
       }]),
     );
   });

@@ -298,8 +298,15 @@ async function main() {
       res.writeHead(200, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' });
       res.end('ok');
     });
-    // 不带 CORS 的端点：模拟普通网关，renderer 测速应降级为失败而非崩溃
-    const noCors = http.createServer((req, res) => { res.writeHead(200); res.end('ok'); });
+    // 不带 CORS 且 302 跳转的端点：模拟要求登录的普通网关
+    const noCors = http.createServer((req, res) => {
+      if (req.url === '/gw') {
+        res.writeHead(302, { Location: '/ok' });
+        return res.end();
+      }
+      res.writeHead(200);
+      res.end('ok');
+    });
     await new Promise(res => server.listen(0, '127.0.0.1', res));
     await new Promise(res => noCors.listen(0, '127.0.0.1', res));
     const probePort = server.address().port;
@@ -311,21 +318,25 @@ async function main() {
           method: 'HEAD', redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store',
         });
         const ms = Math.round(performance.now() - t0);
-        let corsBlocked = false;
+        // 测速实际使用的模式：no-cors + 跟随重定向，无 CORS 头的 302 网关也应可测。
+        let noCorsOk = false;
         try {
-          await fetch('http://127.0.0.1:${noCorsPort}/ping', { method: 'HEAD', redirect: 'error', credentials: 'omit' });
-        } catch { corsBlocked = true; }
+          await fetch('http://127.0.0.1:${noCorsPort}/gw', {
+            method: 'HEAD', mode: 'no-cors', redirect: 'follow', credentials: 'omit',
+          });
+          noCorsOk = true;
+        } catch {}
         let fileBlocked = false;
         try { await fetch('file:///etc/passwd'); } catch { fileBlocked = true; }
-        return { status: r.status, ms, corsBlocked, fileBlocked };
+        return { status: r.status, ms, noCorsOk, fileBlocked };
       })()`,
     );
     await new Promise(res => server.close(res));
     await new Promise(res => noCors.close(res));
     assert('窗口内可对允许跨源的 HTTP 端点测速', latency && latency.status === 200 && Number.isFinite(latency.ms), JSON.stringify(latency));
     assert('非 HTTP(S) 目标被拒(file:)', latency && latency.fileBlocked === true, JSON.stringify(latency));
-    // 已知边界：无 CORS 头的目标会因跨源限制取不到响应，测速显示失败（renderer catch → null）。
-    assert('无 CORS 目标测速降级为失败而非崩溃', latency && latency.corsBlocked === true, JSON.stringify(latency));
+    // 无 CORS 头的网关在 no-cors 模式下不可读响应体，但仍能测到时延。
+    assert('无 CORS 且 302 的网关可测速', latency && latency.noCorsOk === true, JSON.stringify(latency));
 
     // 单实例锁：隔离入口为每个进程派生独立 userData，锁键不同路径，无法互斥。
     // 因此这里不把它们当作失败，只记录“未验证”，真实单实例需同一 userData 场景另行验收。

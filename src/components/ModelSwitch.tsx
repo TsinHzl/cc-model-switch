@@ -309,7 +309,7 @@ function ActiveHero({
         </div>
       </div>
       <div className="active-hero-right">
-        <div className="latency-pill" title="仅测 HTTP(S) 响应时延，不代表模型 API 可用；不跟随重定向，网络或浏览器安全限制可能导致测速失败">
+        <div className="latency-pill" title="仅测 HTTP(S) 响应时延，不代表模型 API 可用；网络不可达时可能测速失败">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
           </svg>

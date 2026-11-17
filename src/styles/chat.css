@@ -124,9 +124,9 @@
 .chat-attachments-inline { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
 .chat-attach-name { font-size: 12px; color: var(--text-secondary); }
 /* 容器高度对齐一行正文，等待动画出现/消失时不推动下方内容。 */
-.chat-caret { display: inline-flex; align-items: center; gap: 10px; padding: 4px 2px; min-height: 21px; }
+.chat-caret { display: inline-flex; align-items: center; gap: 6px; padding: 4px 2px; min-height: 21px; }
 .chat-caret i {
-  width: 13px; height: 13px; border-radius: 50%;
+  width: 7px; height: 7px; border-radius: 50%;
   background: currentColor; color: var(--text-secondary);
   animation: caret-dot 1.4s infinite;
 }

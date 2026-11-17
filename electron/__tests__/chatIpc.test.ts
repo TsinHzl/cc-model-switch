@@ -61,11 +61,15 @@ describe('对话 handler 边界', () => {
   let sent: ChatChunk[];
   let fetchMock: ReturnType<typeof vi.fn>;
 
-  const build = (entries: unknown = [ENTRY]) => createChatHandlers({
+  const build = (
+    entries: unknown = [ENTRY],
+    timeouts?: { firstByteMs: number; idleMs: number },
+  ) => createChatHandlers({
     store: storeWith(entries),
     getTrustedWindow: () => source.trusted,
     send: chunk => { sent.push(chunk); },
     fetchImpl: fetchMock as unknown as typeof fetch,
+    ...(timeouts ? { timeouts } : {}),
   });
 
   beforeEach(() => {
@@ -470,5 +474,124 @@ describe('对话 handler 边界', () => {
     expect(sent.some(chunk => chunk.kind === 'search_call')).toBe(false);
     const error = sent.find(chunk => chunk.kind === 'error') as { message: string };
     expect(error.message).toContain('未返回任何正文');
+  });
+
+  it('网关接受连接却一直不回响应头时按首字节超时中止', async () => {
+    // 复现：fetch 永不 resolve，renderer 一直显示三个点，侧栏因此永久 locked。
+    fetchMock.mockImplementation((_url, init) => new Promise((_resolve, reject) => {
+      init!.signal!.addEventListener('abort', () => {
+        reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+      }, { once: true });
+    }));
+
+    const handlers = build([ENTRY], { firstByteMs: 30, idleMs: 30 });
+    await handlers.start(source.event, request());
+    await vi.waitFor(() => expect(sent.some(chunk => chunk.kind === 'error')).toBe(true), {
+      timeout: 2000,
+    });
+
+    const error = sent.find(chunk => chunk.kind === 'error') as { message: string; code?: string };
+    expect(error.message).toContain('长时间无响应');
+    // 超时不应被当作「用户停止」，否则页面会显示"已中止"并掩盖真实原因。
+    expect(error.code).not.toBe('ABORTED');
+    // 名额已释放：下一条请求可以立即发起，而不是一直 RATE_LIMITED。
+    fetchMock.mockResolvedValueOnce(sseResponse(textFrames('hi')));
+    expect(await handlers.start(source.event, request())).toMatchObject({ success: true });
+  });
+
+  it('流建立后长时间无新数据时按空闲超时中止', async () => {
+    // 已收到响应头和部分事件，但之后网关不再吐字节（keep-alive 挂着）。
+    let pullCount = 0;
+    const encoder = new TextEncoder();
+    fetchMock.mockImplementation(async (_url, init) => {
+      const signal = init!.signal!;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          // 真实 fetch 在 abort 时会以 AbortError 中止 body；mock 需自行模拟。
+          signal.addEventListener('abort', () => {
+            controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+          }, { once: true });
+        },
+        pull(controller) {
+          pullCount += 1;
+          if (pullCount === 1) {
+            controller.enqueue(encoder.encode(
+              'data: {"type":"message_start","message":{"usage":{"input_tokens":3}}}\n\n',
+            ));
+          }
+          // 之后不再 enqueue：模拟挂起的 SSE。
+        },
+      });
+      return new Response(stream, { status: 200 });
+    });
+
+    const handlers = build([ENTRY], { firstByteMs: 2000, idleMs: 30 });
+    await handlers.start(source.event, request());
+    await vi.waitFor(() => expect(sent.some(chunk => chunk.kind === 'error')).toBe(true), {
+      timeout: 2000,
+    });
+    const error = sent.find(chunk => chunk.kind === 'error') as { message: string };
+    expect(error.message).toContain('长时间无响应');
+  });
+
+  it('收到 message_stop 后立即收尾，不等网关关闭连接', async () => {
+    // 部分网关发完 message_stop 仍保持连接不关；此时不应等到空闲超时才结束。
+    const encoder = new TextEncoder();
+    const frames = [
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"完整回复"}}\n\n',
+      'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{}}\n\n',
+      'data: {"type":"message_stop"}\n\n',
+    ];
+    fetchMock.mockImplementation(async () => {
+      let i = 0;
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (i < frames.length) { controller.enqueue(encoder.encode(frames[i]!)); i += 1; }
+          // 发完后既不 close 也不再 enqueue：模拟 keep-alive 挂起。
+        },
+      });
+      return new Response(stream, { status: 200 });
+    });
+
+    // idleMs 设得很短，若实现依赖 EOF 或超时，就会报错而不是正常 done。
+    const handlers = build([ENTRY], { firstByteMs: 2000, idleMs: 200 });
+    await handlers.start(source.event, request());
+    await vi.waitFor(() => expect(sent.at(-1)?.kind).toBe('done'), { timeout: 1500 });
+
+    expect(sent.some(chunk => chunk.kind === 'error')).toBe(false);
+    const texts = sent.filter(chunk => chunk.kind === 'text')
+      .map(chunk => (chunk as { delta: string }).delta).join('');
+    expect(texts).toBe('完整回复');
+  });
+
+  it('非 2xx 响应的 body 读取也有超时，不会永久挂死在途名额', async () => {
+    // 网关回了 500 头，但 body 一直不发也不关连接：原实现对 text() 无时限。
+    fetchMock.mockImplementation(async (_url, init) => {
+      const signal = init!.signal!;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal.addEventListener('abort', () => {
+            controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+          }, { once: true });
+        },
+        // 永不 enqueue、不 close。
+        pull() {},
+      });
+      return new Response(stream, { status: 500 });
+    });
+
+    const handlers = build([ENTRY], { firstByteMs: 2000, idleMs: 30 });
+    const startedAt = Date.now();
+    await handlers.start(source.event, request());
+    await vi.waitFor(() => expect(sent.some(chunk => chunk.kind === 'error')).toBe(true), {
+      timeout: 2000,
+    });
+
+    // 关键：不挂死。超时后名额必须释放，后续请求不再 RATE_LIMITED。
+    expect(Date.now() - startedAt).toBeLessThan(2000);
+    const error = sent.find(chunk => chunk.kind === 'error') as { message: string };
+    expect(error.message).toContain('长时间无响应');
+    fetchMock.mockResolvedValueOnce(sseResponse(textFrames('hi')));
+    expect(await handlers.start(source.event, request())).toMatchObject({ success: true });
   });
 });

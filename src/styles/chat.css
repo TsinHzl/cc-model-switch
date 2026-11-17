@@ -123,14 +123,19 @@
 }
 .chat-attachments-inline { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
 .chat-attach-name { font-size: 12px; color: var(--text-secondary); }
-.chat-caret { color: var(--text-secondary); font-size: 14px; letter-spacing: 2px; }
-.chat-caret i { font-style: normal; animation: caret-dot 1.4s infinite; }
+/* 容器高度对齐一行正文，等待动画出现/消失时不推动下方内容。 */
+.chat-caret { display: inline-flex; align-items: center; gap: 10px; padding: 4px 2px; min-height: 21px; }
+.chat-caret i {
+  width: 13px; height: 13px; border-radius: 50%;
+  background: currentColor; color: var(--text-secondary);
+  animation: caret-dot 1.4s infinite;
+}
 .chat-caret i:nth-child(1) { animation-delay: 0s; }
 .chat-caret i:nth-child(2) { animation-delay: 0.2s; }
 .chat-caret i:nth-child(3) { animation-delay: 0.4s; }
 @keyframes caret-dot {
-  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
-  30% { opacity: 1; transform: translateY(-3px); }
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0) scale(1); }
+  30% { opacity: 1; transform: translateY(-5px) scale(1.15); }
 }
 .chat-block { margin: 6px 0; }
 .chat-collapse { border: none; background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer; padding: 2px 0; }

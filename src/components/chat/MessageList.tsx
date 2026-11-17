@@ -152,7 +152,7 @@ export function MessageItem({
       {message.reasoning && <ReasoningBlock message={message} />}
       {message.searches?.map(s => <SearchBlock key={s.id} search={s} />)}
       {message.content !== '' && <Markdown text={message.content} />}
-      {waiting && <span className="chat-caret"><i />·<i />·<i />·</span>}
+      {waiting && <span className="chat-caret" aria-label="正在生成"><i /><i /><i /></span>}
       {message.status === 'stopped' && <p className="chat-status">已停止生成。</p>}
       {message.status === 'error' && <p className="chat-status error">{message.error ?? '对话请求失败。'}</p>}
       {!streaming && (

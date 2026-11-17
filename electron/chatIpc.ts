@@ -25,6 +25,10 @@ const TOOL_UNSUPPORTED_MESSAGE = '该网关不执行联网搜索，且未能生�
 /** 回填用尽后正文仍停在过渡前言：明确告知不完整，避免被当成完整答复。 */
 const INCOMPLETE_MESSAGE = '回复只输出了开头就停止了（网关未执行联网搜索）；请重试或关闭联网搜索。';
 const EMPTY_ANSWER_MESSAGE = '模型网关未返回任何正文内容；请重试或更换模型。';
+/** 网关只建立连接不回数据时不能让请求永久挂起：超时后中止并释放在途名额。 */
+const FIRST_BYTE_TIMEOUT_MS = 30_000;
+const STREAM_IDLE_TIMEOUT_MS = 60_000;
+const TIMEOUT_MESSAGE = '模型网关长时间无响应，已中止本次请求；请重试或更换网关。';
 
 export interface ChatHandlerOptions {
   readonly store: FileStore;
@@ -32,6 +36,8 @@ export interface ChatHandlerOptions {
   /** 投递流式事件；窗口销毁时应抛错以终止推送。 */
   readonly send: (chunk: ChatChunk) => void;
   readonly fetchImpl?: typeof fetch;
+  /** 仅供测试注入更短的时限；生产固定使用上面的常量。 */
+  readonly timeouts?: { readonly firstByteMs: number; readonly idleMs: number };
 }
 
 interface ConfigTriple {
@@ -92,6 +98,8 @@ function classifyError(error: unknown): ChatErrorCode {
 
 export function createChatHandlers(options: ChatHandlerOptions) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  const firstByteMs = options.timeouts?.firstByteMs ?? FIRST_BYTE_TIMEOUT_MS;
+  const idleMs = options.timeouts?.idleMs ?? STREAM_IDLE_TIMEOUT_MS;
   /** 全局只允许一条在途对话流；忙时拒绝、不排队。 */
   let active: { readonly id: string; readonly controller: AbortController } | null = null;
 
@@ -108,6 +116,9 @@ export function createChatHandlers(options: ChatHandlerOptions) {
     id: string, entry: ConfigTriple, request: ChatStartRequest, controller: AbortController,
   ): Promise<void> {
     let answered = false;
+    /** 超时导致的中止与用户主动停止要区分开，否则会被误报成「已中止」。 */
+    let timedOut = false;
+    let roundTimer: ReturnType<typeof setTimeout> | undefined;
     const push = (events: Parameters<typeof toChunks>[1]) => {
       for (const event of events) {
         if (event.kind === 'text' && event.delta.trim() !== '') answered = true;
@@ -129,24 +140,50 @@ export function createChatHandlers(options: ChatHandlerOptions) {
       const searchHeaders = request.webSearch
         ? { ...baseHeaders, 'x-web-search-mode': 'model' } : baseHeaders;
 
+      const abortAfter = (ms: number) => {
+        clearTimeout(roundTimer);
+        roundTimer = setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, ms);
+      };
+
       /** 执行单轮请求并回放事件；出错时返回 null（错误事件已推送）。 */
       const requestRound = async (
         body: Record<string, unknown>, headers: Record<string, string>,
       ): Promise<SseState | null> => {
-        const response = await fetchImpl(endpoint, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(body),
-          redirect: 'error',
-          signal: controller.signal,
-        });
+        // 网关可能已接受连接却长期不回任何字节，fetch 会一直挂起；
+        // 因此「拿到响应头」和「两次数据之间」各设一道时限。
+        let response: Response;
+        abortAfter(firstByteMs);
+        try {
+          response = await fetchImpl(endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+            redirect: 'error',
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(roundTimer);
+        }
         if (!response.ok) {
-          const detail = await response.text().catch(() => '');
+          // 错误详情也要有时限：网关可能回错误头后既不发送 body 也不关连接，
+          // 此时 await text() 会永久挂起，在途名额随之无法释放。
+          abortAfter(idleMs);
+          let detail = '';
+          try {
+            detail = await response.text().catch(() => '');
+          } finally {
+            clearTimeout(roundTimer);
+          }
           push([{
             kind: 'error',
-            message: detail.trim() === ''
-              ? `模型网关返回错误 (HTTP ${response.status})`
-              : `${detail.trim().slice(0, 300)} (HTTP ${response.status})`,
+            message: timedOut
+              ? TIMEOUT_MESSAGE
+              : detail.trim() === ''
+                ? `模型网关返回错误 (HTTP ${response.status})`
+                : `${detail.trim().slice(0, 300)} (HTTP ${response.status})`,
           }]);
           return null;
         }
@@ -158,12 +195,26 @@ export function createChatHandlers(options: ChatHandlerOptions) {
         const decoder = createSseDecoder(state);
         const textDecoder = new TextDecoder();
         const reader = response.body.getReader();
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          push(decoder.push(textDecoder.decode(value, { stream: true })));
+        try {
+          abortAfter(idleMs);
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            // 收到任何数据都重置空闲计时，避免长回复被总时长限制误杀。
+            abortAfter(idleMs);
+            push(decoder.push(textDecoder.decode(value, { stream: true })));
+            // 收到 message_stop 即本轮已完整结束；部分网关不关连接（keep-alive 挂着），
+            // 若继续等 EOF 只会在空闲超时后误报「长时间无响应」。
+            // 不 await cancel：网关迟滞时不能让它继续占住单在途名额。
+            if (state.messageStopped) {
+              void reader.cancel().catch(() => {});
+              break;
+            }
+          }
+          push(decoder.end());
+        } finally {
+          clearTimeout(roundTimer);
         }
-        push(decoder.end());
         if (!state.messageStopped) {
           push([{ kind: 'error', message: TRUNCATED_MESSAGE }]);
           return null;
@@ -265,7 +316,9 @@ export function createChatHandlers(options: ChatHandlerOptions) {
       finished = true;
     } catch (error) {
       const code = classifyError(error);
-      if (code === 'ABORTED') {
+      if (timedOut) {
+        push([{ kind: 'error', message: TIMEOUT_MESSAGE }]);
+      } else if (code === 'ABORTED') {
         emit({ id, kind: 'error', code: 'ABORTED', message: '对话已中止，已收到的内容已保留。' });
       } else {
         push([{ kind: 'error', message: code === 'TLS_ERROR'
@@ -273,6 +326,7 @@ export function createChatHandlers(options: ChatHandlerOptions) {
       }
       finished = true;
     } finally {
+      clearTimeout(roundTimer);
       if (active?.id === id) active = null;
       if (!finished) emit({ id, kind: 'error', code: 'IO_FAILED', message: '对话流异常结束。' });
     }

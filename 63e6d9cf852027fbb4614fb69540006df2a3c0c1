@@ -1,0 +1,29 @@
+src/components/chat/MessageList.tsx
+  fc214a46bf819dce 155
+electron/chatIpc.ts
+  fc214a46bf819dce 28-31,39-40,101-102,119-121,143-150,155-169,171-179,182-186,198-216,319-321,329
+electron/__tests__/chatIpc.test.ts
+  fc214a46bf819dce 64-67,72,478-596
+src/styles/chat.css
+  fc214a46bf819dce 126-131,137-138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "63e6d9cf852027fbb4614fb69540006df2a3c0c1",
+  "prompts": {
+    "fc214a46bf819dce": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83fdcfe3-808e-459f-93cc-9989f829707c",
+        "model": "deepseek-v4.1-flash-1017"
+      },
+      "human_author": "TsinHzl <tsinhzl@icloud.com>",
+      "messages": [],
+      "total_additions": 272,
+      "total_deletions": 90,
+      "accepted_lines": 215,
+      "overriden_lines": 0
+    }
+  }
+}

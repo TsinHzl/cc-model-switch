@@ -71,6 +71,7 @@
   overflow-y: auto;
   width: min(1200px, 100%);
   margin: 0 auto;
+  padding-top: 20px;
   display: flex;
   flex-direction: column;
   gap: 24px;

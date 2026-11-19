@@ -1,33 +1,33 @@
 /* 主题层：暗色为基线（无 data-theme 时回退暗色，兼容脚本未运行场景），浅色由 data-theme="light" 覆盖。
    单一驱动源：CSS 只响应根元素 [data-theme]，系统外观偏好由 JS matchMedia 订阅后写入该属性，不在此用 prefers-color-scheme 覆盖。 */
 :root {
-  --bg: #090b10;
-  /* 玻璃卡片 */
-  --card-bg: rgba(18, 22, 34, 0.75);
-  --card-hover: rgba(26, 32, 50, 0.85);
-  --card-active: rgba(30, 41, 68, 0.9);
-  --border: rgba(255, 255, 255, 0.08);
-  --border-focus: rgba(99, 102, 241, 0.4);
-  --text: #f1f5f9;
-  --text-secondary: #8b949e;
-  --text-muted: #8b949e;
-  --text-dim: #64748b;
+  --bg: #080a12;
+  /* 玻璃卡片：蓝调深玻璃，与浅色层同级层次感 */
+  --card-bg: rgba(20, 25, 42, 0.72);
+  --card-hover: rgba(30, 37, 60, 0.88);
+  --card-active: rgba(34, 46, 78, 0.92);
+  --border: rgba(255, 255, 255, 0.09);
+  --border-focus: rgba(99, 102, 241, 0.45);
+  --text: #f2f5fb;
+  --text-secondary: #94a0b5;
+  --text-muted: #94a0b5;
+  --text-dim: #6a768b;
   --accent: #6366f1;
-  --accent-hover: #4f46e5;
-  --accent-glow: rgba(99, 102, 241, 0.25);
+  --accent-hover: #7b7fff;
+  --accent-glow: rgba(99, 102, 241, 0.3);
   --success: #10b981;
-  --success-glow: rgba(16, 185, 129, 0.25);
+  --success-glow: rgba(16, 185, 129, 0.28);
   --danger: #f43f5e;
   --danger-hover: #e11d48;
   --radius: 14px;
   --radius-sm: 8px;
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-  /* 兼容旧引用（换皮过渡期组件仍引用的部分变量） */
-  --bg-elevated: rgba(18, 22, 34, 0.75);
-  --bg-card: rgba(255, 255, 255, 0.04);
-  --bg-hover: rgba(255, 255, 255, 0.08);
-  --border-active: rgba(255, 255, 255, 0.15);
+  /* 兼容旧引用：半透明叠加用靛蓝 tint，与浅色层语义对齐 */
+  --bg-elevated: rgba(20, 25, 42, 0.72);
+  --bg-card: rgba(99, 102, 241, 0.075);
+  --bg-hover: rgba(99, 102, 241, 0.14);
+  --border-active: rgba(99, 102, 241, 0.36);
   --on-accent: #fff;
   --warning: #f5b544;
   color-scheme: dark;
@@ -70,9 +70,9 @@ body {
   background-color: var(--bg);
   /* 三重 radial 渐变光晕（设计稿）；浅色下由负载变量差分化 */
   background-image:
-    radial-gradient(circle at 15% 10%, rgba(99, 102, 241, 0.12) 0%, transparent 40%),
-    radial-gradient(circle at 85% 85%, rgba(16, 185, 129, 0.08) 0%, transparent 40%),
-    radial-gradient(circle at 50% 50%, rgba(15, 23, 42, 0.4) 0%, transparent 100%);
+    radial-gradient(circle at 12% 8%, rgba(99, 102, 241, 0.2) 0%, transparent 44%),
+    radial-gradient(circle at 88% 88%, rgba(16, 185, 129, 0.13) 0%, transparent 44%),
+    radial-gradient(circle at 50% 40%, rgba(30, 41, 88, 0.55) 0%, transparent 82%);
   color: var(--text);
   font-family: var(--font);
   -webkit-font-smoothing: antialiased;

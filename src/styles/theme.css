@@ -33,31 +33,31 @@
   color-scheme: dark;
 }
 
-/* 浅色覆盖：文字中间色与兼容半透明叠加变量均改为浅底深灰取向，保证对比度。 */
+/* 浅色覆盖：冷色通透底 + 白色卡片 + 靛蓝辉光 hover，规避深色半透明叠加导致的脏灰。 */
 :root[data-theme="light"] {
-  --bg: #f6f7f9;
-  --card-bg: rgba(255, 255, 255, 0.82);
-  --card-hover: rgba(255, 255, 255, 0.94);
-  --card-active: rgba(237, 240, 248, 0.96);
-  --border: rgba(15, 23, 42, 0.1);
-  --border-focus: rgba(99, 102, 241, 0.5);
-  --text: #1b2434;
-  --text-secondary: #4b5563;
-  --text-muted: #4b5563;
-  --text-dim: #6b7280;
-  --accent: #5a5ee0;
+  --bg: #eef1f7;
+  --card-bg: rgba(255, 255, 255, 0.92);
+  --card-hover: rgba(255, 255, 255, 0.98);
+  --card-active: rgba(238, 241, 250, 0.97);
+  --border: rgba(15, 23, 42, 0.09);
+  --border-focus: rgba(99, 102, 241, 0.45);
+  --text: #1a2233;
+  --text-secondary: #4b5666;
+  --text-muted: #4b5666;
+  --text-dim: #6b7686;
+  --accent: #5b5fe8;
   --accent-hover: #4f46e5;
-  --accent-glow: rgba(99, 102, 241, 0.16);
+  --accent-glow: rgba(99, 102, 241, 0.14);
   --success: #059669;
-  --success-glow: rgba(16, 185, 129, 0.16);
+  --success-glow: rgba(16, 185, 129, 0.14);
   --danger: #e11d48;
   --danger-hover: #be123c;
-  /* 兼容旧引用：半透明浅色叠加改为深色叠加（浅底上语义翻转） */
-  --bg-elevated: rgba(255, 255, 255, 0.82);
-  --bg-card: rgba(15, 23, 42, 0.05);
-  --bg-hover: rgba(15, 23, 42, 0.09);
-  --border-active: rgba(15, 23, 42, 0.18);
-  --warning: #d97706;
+  /* 兼容旧引用：半透明叠加改用冷色 slate 浅tint，避免深色叠加深灰 */
+  --bg-elevated: rgba(255, 255, 255, 0.92);
+  --bg-card: rgba(99, 102, 241, 0.07);
+  --bg-hover: rgba(99, 102, 241, 0.09);
+  --border-active: rgba(99, 102, 241, 0.32);
+  --warning: #c27803;
   --on-accent: #fff;
   color-scheme: light;
 }
@@ -83,9 +83,9 @@ body {
 
 :root[data-theme="light"] body {
   background-image:
-    radial-gradient(circle at 15% 10%, rgba(99, 102, 241, 0.08) 0%, transparent 40%),
-    radial-gradient(circle at 85% 85%, rgba(16, 185, 129, 0.05) 0%, transparent 40%),
-    radial-gradient(circle at 50% 50%, rgba(15, 23, 42, 0.04) 0%, transparent 100%);
+    radial-gradient(circle at 12% 8%, rgba(99, 102, 241, 0.13) 0%, transparent 42%),
+    radial-gradient(circle at 88% 88%, rgba(16, 185, 129, 0.09) 0%, transparent 42%),
+    radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.6) 0%, transparent 78%);
 }
 
 #root {

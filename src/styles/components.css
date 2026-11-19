@@ -840,3 +840,58 @@
   gap: 10px;
   flex-wrap: wrap;
 }
+
+/* ============ 浅色白天模式特化（:root[data-theme="light"]） ============ */
+:root[data-theme="light"] .btn-primary {
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.28);
+}
+:root[data-theme="light"] .active-hero {
+  background:
+    linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(99, 102, 241, 0.08) 100%),
+    var(--card-bg);
+  border-color: rgba(16, 185, 129, 0.35);
+  box-shadow:
+    0 10px 30px rgba(31, 36, 66, 0.1),
+    0 1px 3px rgba(31, 36, 66, 0.06);
+}
+:root[data-theme="light"] .active-pulse-badge,
+:root[data-theme="light"] .latency-pill {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+:root[data-theme="light"] .pulse-dot {
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+}
+:root[data-theme="light"] .endpoint-url,
+:root[data-theme="light"] .endpoint-url svg {
+  color: #4f46e5;
+}
+:root[data-theme="light"] .model-name {
+  color: var(--text);
+}
+:root[data-theme="light"] .btn-switch.current {
+  color: #047857;
+  border-color: rgba(16, 185, 129, 0.4);
+}
+:root[data-theme="light"] .version-tag {
+  color: #4f46e5;
+  border-color: rgba(99, 102, 241, 0.35);
+  background: rgba(99, 102, 241, 0.1);
+}
+:root[data-theme="light"] .key-box {
+  background: rgba(99, 102, 241, 0.06);
+  border-color: var(--border);
+}
+
+/* ============ 弹窗 / toast：浅色下减轻遮罩与阴影 ============ */
+:root[data-theme="light"] .modal-mask {
+  background: rgba(15, 23, 42, 0.28);
+}
+:root[data-theme="light"] .modal {
+  box-shadow: 0 16px 48px rgba(31, 36, 66, 0.18);
+}
+:root[data-theme="light"] .toast {
+  box-shadow: 0 8px 28px rgba(31, 36, 66, 0.18);
+}

@@ -2,9 +2,12 @@
 .app-shell { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .app-shell .tabs {
   display: flex;
+  justify-content: space-between;
+  align-items: stretch;
   gap: 4px;
   border-bottom: 1px solid var(--border);
 }
+.tabs-item { display: flex; gap: 4px; }
 .tab {
   padding: 8px 18px;
   border: 1px solid transparent;
@@ -21,6 +24,28 @@
   color: var(--text);
   border-color: var(--border);
   font-weight: 600;
+}
+
+/* 顶部导航右侧：主题模式切换 */
+.tabs-right { display: flex; gap: 2px; align-items: center; margin-bottom: 8px; }
+.theme-toggle {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 3px 9px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.theme-toggle:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.theme-toggle:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.theme-toggle + .theme-toggle { margin-left: -1px; }
+.theme-toggle:hover { color: var(--text); }
+.theme-toggle.is-active {
+  background: var(--accent-glow);
+  border-color: var(--accent);
+  color: var(--text);
 }
 
 .chat-page {
@@ -221,7 +246,7 @@
   font-size: 11px;
 }
 .composer-send {
-  border: none; background: var(--accent); color: #fff; border-radius: 999px; padding: 6px 16px;
+  border: none; background: var(--accent); color: var(--on-accent); border-radius: 999px; padding: 6px 16px;
   font-size: 13px; font-weight: 600; cursor: pointer; flex-shrink: 0; white-space: nowrap;
 }
 .composer-send:hover { background: var(--accent-hover); }

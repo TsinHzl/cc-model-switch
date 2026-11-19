@@ -1,4 +1,5 @@
-/* Linear Dark Glass 主题（设计稿 01-linear-dark-glass.html）*/
+/* 主题层：暗色为基线（无 data-theme 时回退暗色，兼容脚本未运行场景），浅色由 data-theme="light" 覆盖。
+   单一驱动源：CSS 只响应根元素 [data-theme]，系统外观偏好由 JS matchMedia 订阅后写入该属性，不在此用 prefers-color-scheme 覆盖。 */
 :root {
   --bg: #090b10;
   /* 玻璃卡片 */
@@ -27,12 +28,47 @@
   --bg-card: rgba(255, 255, 255, 0.04);
   --bg-hover: rgba(255, 255, 255, 0.08);
   --border-active: rgba(255, 255, 255, 0.15);
+  --on-accent: #fff;
   --warning: #f5b544;
+  color-scheme: dark;
+}
+
+/* 浅色覆盖：文字中间色与兼容半透明叠加变量均改为浅底深灰取向，保证对比度。 */
+:root[data-theme="light"] {
+  --bg: #f6f7f9;
+  --card-bg: rgba(255, 255, 255, 0.82);
+  --card-hover: rgba(255, 255, 255, 0.94);
+  --card-active: rgba(237, 240, 248, 0.96);
+  --border: rgba(15, 23, 42, 0.1);
+  --border-focus: rgba(99, 102, 241, 0.5);
+  --text: #1b2434;
+  --text-secondary: #4b5563;
+  --text-muted: #4b5563;
+  --text-dim: #6b7280;
+  --accent: #5a5ee0;
+  --accent-hover: #4f46e5;
+  --accent-glow: rgba(99, 102, 241, 0.16);
+  --success: #059669;
+  --success-glow: rgba(16, 185, 129, 0.16);
+  --danger: #e11d48;
+  --danger-hover: #be123c;
+  /* 兼容旧引用：半透明浅色叠加改为深色叠加（浅底上语义翻转） */
+  --bg-elevated: rgba(255, 255, 255, 0.82);
+  --bg-card: rgba(15, 23, 42, 0.05);
+  --bg-hover: rgba(15, 23, 42, 0.09);
+  --border-active: rgba(15, 23, 42, 0.18);
+  --warning: #d97706;
+  --on-accent: #fff;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 body {
   background-color: var(--bg);
-  /* 三重 radial 渐变光晕（设计稿） */
+  /* 三重 radial 渐变光晕（设计稿）；浅色下由负载变量差分化 */
   background-image:
     radial-gradient(circle at 15% 10%, rgba(99, 102, 241, 0.12) 0%, transparent 40%),
     radial-gradient(circle at 85% 85%, rgba(16, 185, 129, 0.08) 0%, transparent 40%),
@@ -42,6 +78,14 @@ body {
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
   margin: 0;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+:root[data-theme="light"] body {
+  background-image:
+    radial-gradient(circle at 15% 10%, rgba(99, 102, 241, 0.08) 0%, transparent 40%),
+    radial-gradient(circle at 85% 85%, rgba(16, 185, 129, 0.05) 0%, transparent 40%),
+    radial-gradient(circle at 50% 50%, rgba(15, 23, 42, 0.04) 0%, transparent 100%);
 }
 
 #root {
@@ -57,8 +101,4 @@ body {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-}
-
-:root {
-  color-scheme: dark;
 }
